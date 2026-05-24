@@ -1,6 +1,5 @@
 use crate::PieceType;
 use crate::config::{ReplayConfig, MAX_PIECES};
-use crate::bitboard::HOLD_MASK;
 use crate::movegen::rebuild_actions_general;
 use crate::movegen::Actions;
 use crate::search::PathNode;
@@ -30,8 +29,8 @@ enum ReplayEvent {
 fn compile_path(path: &[PathNode], piece_sequence: &[PieceType], das_frame: u32, replay_config: &ReplayConfig) -> Vec<u32> {
     // unimplemented!()
     debug_assert!(piece_sequence.len() == MAX_PIECES);
-    debug_assert!(path.len() == piece_sequence.len() + 1 || path.len() == piece_sequence.len() && path.last().unwrap().meta() & HOLD_MASK == 0,
-                  "Path length must be one more than piece sequence length, or equal when last node has no hold");
+    debug_assert!(!path.is_empty() && path.len() <= piece_sequence.len() + 1,
+                  "Path length must fit within the generated piece sequence");
     let mut operations = Vec::new();
     // operations format: (frame, event), (frame, event)...
     let mut timestamp = replay_config.first_op;

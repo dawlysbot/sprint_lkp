@@ -8,7 +8,6 @@ pub mod bagrng;
 pub mod replay;
 
 pub use bitboard::{Board, SearchNode};
-pub use config::Config;
 pub use evaluator::evaluate;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

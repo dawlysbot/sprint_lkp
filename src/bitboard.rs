@@ -120,8 +120,8 @@ pub const RAW_DATA: [(u32, u32); 19] = [
     raw_pack(4, [0, 0, 0, 0], 1, 0x1111, [1, 2, 1, 0, 1, 2, 1, 0, 0, 0], 0b1100011),
     raw_pack(1, [0, 0, 0, 0], 4, 0x4, [2, 2, 2, 2, 1, 1, 2, 2, 2, 2], 0b1110000111),
 ];
-const fn shape_to_bit(arr: &[FastMask; 19]) -> [u16; 19] {
-    let mut bit_arr = [0u16; 19];
+const fn shape_to_bit(arr: &[FastMask; 19]) -> [u32; 19] {
+    let mut bit_arr = [0u32; 19];
     let mut i = 0;
     while i < arr.len() {
         let mask = arr[i];
@@ -134,12 +134,11 @@ const fn shape_to_bit(arr: &[FastMask; 19]) -> [u16; 19] {
             if max_height < height + bottom {
                 max_height = height + bottom;
             }
-            bit_mask |= ((1u16 << height) - 1) << bottom << (x * 4);
-            // highest bit is 12 (I0)
-            // so we use bit 13-15 to store the max height
+            bit_mask |= ((1u32 << height) - 1) << bottom << (x * 6);
+            // The highest shape bit is below bit 24, so bits 24-26 store the max height.
             x += 1;
         }
-        bit_arr[i] = bit_mask | (max_height as u16) << 13;
+        bit_arr[i] = bit_mask | max_height << 24;
         i += 1;
     }
     bit_arr
@@ -162,17 +161,19 @@ const SHAPE_TABLE: [FastMask; 19] = {
     }
     table
 };
-pub const BIT_TABLE: [u16; 19] = shape_to_bit(&SHAPE_TABLE);
+pub const BIT_TABLE: [u32; 19] = shape_to_bit(&SHAPE_TABLE);
 
 pub trait Board: Clone + Copy + PartialEq + Eq + std::hash::Hash + Default {
+    const QUAD_ONLY: bool = true;
     fn drop_piece(&self, x: u8, piece_idx: u8, lines_cleared: u16) -> Option<(Self, u8)>;
 }
 trait BoardInternal: Sized {
     const QUAD_ONLY: bool = true;
     fn try_place(&self, x: u8, piece_idx: u8, lines_cleared: u16) -> Option<Self>;
-    fn clear_lines(&self) -> (Self, u64);
+    fn clear_lines(&self) -> (Self, u8);
 }
 impl<B> Board for B where B: BoardInternal + Clone + Copy + PartialEq + Eq + std::hash::Hash + Default {
+    const QUAD_ONLY: bool = B::QUAD_ONLY;
     #[inline]
     fn drop_piece(&self, x: u8, piece_idx: u8, lines_cleared: u16) -> Option<(Self, u8)> {
         let placed = self.try_place(x, piece_idx, lines_cleared)?;
@@ -182,7 +183,7 @@ impl<B> Board for B where B: BoardInternal + Clone + Copy + PartialEq + Eq + std
             return None;
         }
         
-        Some((cleared_board, lines as u8))
+        Some((cleared_board, lines))
     }
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -190,7 +191,7 @@ pub struct ShapeBoard {
     pub packed_shape: u64,
 }
 impl ShapeBoard {
-    const COL_MASK: u64 = 0x1F;
+    pub const COL_MASK: u64 = 0x1F;
     #[inline(always)]
     pub fn get_height(&self, col: usize) -> u64 {
         (self.packed_shape >> (col * 5)) & Self::COL_MASK
@@ -232,38 +233,58 @@ impl BoardInternal for ShapeBoard {
         Some(Self{packed_shape: self.packed_shape + ((mask.added_mask() as u64) << shift)})
     }
     #[inline(always)]
-    fn clear_lines(&self) -> (Self, u64) {
-        let mut min_h = self.packed_shape & Self::COL_MASK;
-        let mut min_h2 = (self.packed_shape >> 5) & Self::COL_MASK;
-        min_h = min_h.min((self.packed_shape >> 10) & Self::COL_MASK);
-        min_h2 = min_h2.min((self.packed_shape >> 15) & Self::COL_MASK);
-        min_h = min_h.min((self.packed_shape >> 20) & Self::COL_MASK);
-        min_h2 = min_h2.min((self.packed_shape >> 25) & Self::COL_MASK);
-        min_h = min_h.min((self.packed_shape >> 30) & Self::COL_MASK);
-        min_h2 = min_h2.min((self.packed_shape >> 35) & Self::COL_MASK);
-        min_h = min_h.min((self.packed_shape >> 40) & Self::COL_MASK);
-        min_h2 = min_h2.min((self.packed_shape >> 45) & Self::COL_MASK);
+    fn clear_lines(&self) -> (Self, u8) {
+        let mut min_h = (self.packed_shape & Self::COL_MASK) as u8;
+        let mut min_h2 = ((self.packed_shape >> 5) & Self::COL_MASK) as u8;
+        min_h = min_h.min(((self.packed_shape >> 10) & Self::COL_MASK) as u8);
+        min_h2 = min_h2.min(((self.packed_shape >> 15) & Self::COL_MASK) as u8);
+        min_h = min_h.min(((self.packed_shape >> 20) & Self::COL_MASK) as u8);
+        min_h2 = min_h2.min(((self.packed_shape >> 25) & Self::COL_MASK) as u8);
+        min_h = min_h.min(((self.packed_shape >> 30) & Self::COL_MASK) as u8);
+        min_h2 = min_h2.min(((self.packed_shape >> 35) & Self::COL_MASK) as u8);
+        min_h = min_h.min(((self.packed_shape >> 40) & Self::COL_MASK) as u8);
+        min_h2 = min_h2.min(((self.packed_shape >> 45) & Self::COL_MASK) as u8);
 
         const MIN_H_MASK: u64 = 1u64 | (1u64 << 5) | (1u64 << 10) | (1u64 << 15)
             | (1u64 << 20) | (1u64 << 25) | (1u64 << 30)
             | (1u64 << 35) | (1u64 << 40) | (1u64 << 45);
         min_h = min_h.min(min_h2);
-        (Self{packed_shape: self.packed_shape - min_h * MIN_H_MASK}, min_h)
+        (Self{packed_shape: self.packed_shape - min_h as u64 * MIN_H_MASK}, min_h)
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct BitBoard(u64);
 impl BitBoard {
-    const ROW_MASK: u64 = 0x0011_1111_1111;
-    const COL_MASK: u64 = 0xF;
+    const BOARD_MASK: u64 = 0x0FFF_FFFF_FFFF_FFFF;
+    const ROW_MASK: u64 = 0x0041_0410_4104_1041;
+    const COL_MASK: u64 = 0x3F;
     #[inline(always)]
     pub fn get_column(&self, col: usize) -> u64 {
-        self.0 >> (col * 4) & Self::COL_MASK
+        self.0 >> (col * 6) & Self::COL_MASK
     }
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.0 == 0
+    }
+    #[inline(always)]
+    pub fn raw(&self) -> u64 {
+        self.0
+    }
+    #[inline(always)]
+    pub fn occupied_cells(&self) -> u16 {
+        self.0.count_ones() as u16
+    }
+    #[inline(always)]
+    fn full_rows(board: u64) -> u64 {
+        let mut rows = board;
+        rows &= board >> 12;
+        // bit 0-48
+        rows &= rows >> 6;
+        rows &= rows >> 12;
+        rows &= rows >> 24;
+        debug_assert!(rows < Self::COL_MASK);
+        rows
     }
     #[inline]
     pub fn from_shape_board(shape: ShapeBoard) -> Self {
@@ -271,7 +292,7 @@ impl BitBoard {
         for col in 0..10 {
             let height = shape.get_height(col);
             debug_assert!(height <= 4);
-            board |= ((1u64 << height) - 1) << (col * 4);
+            board |= ((1u64 << height) - 1) << (col * 6);
         }
         Self(board)
     }
@@ -279,13 +300,15 @@ impl BitBoard {
 impl BoardInternal for BitBoard {
     const QUAD_ONLY: bool = false;
     fn try_place(&self, x: u8, piece_idx: u8, lines_cleared: u16) -> Option<Self> {
-        let mut height = ((TARGET_LINES - lines_cleared) as u8).checked_sub((BIT_TABLE[piece_idx as usize] >> 13) as u8)?;
+        let shape = BIT_TABLE[piece_idx as usize];
+        let mut height = (((TARGET_LINES - lines_cleared) as u8) + 2).checked_sub((shape >> 24) as u8)?;
         // means the highest row of the piece can be put
-        let mask = ((BIT_TABLE[piece_idx as usize] & 0x1FFF) as u64) << (x * 4);
+        let mask = ((shape as u64) & 0xFFFFFF) << (x * 6);
         // hit check: if I put the piece at height, compute the hitbox
         let mut hitbox = mask << height; // It's guaranteed that this << won't overflow
-        hitbox |= (hitbox & (BitBoard::ROW_MASK * 7)) << 1; // one line blow-up
-        hitbox |= (hitbox & (BitBoard::ROW_MASK * 3)) << 2; // two lines blow-up
+        hitbox |= (hitbox & (BitBoard::ROW_MASK * 0x1F)) << 1; // 1 line blow-up
+        hitbox |= (hitbox & (BitBoard::ROW_MASK * 0xF)) << 2; // 3 lines blow-up
+        hitbox |= (hitbox & (BitBoard::ROW_MASK * 0x3)) << 4; // 7 lines blow-up
         if self.0 & hitbox != 0 {
             return None;
         }
@@ -295,29 +318,28 @@ impl BoardInternal for BitBoard {
             }
             height -= 1;
         }
-        Some(Self(self.0 | (mask << height)))
+        let placed = self.0 | (mask << height);
+        debug_assert!(placed < Self::BOARD_MASK);
+        Some(Self(placed))
     }
-    fn clear_lines(&self) -> (Self, u64) {
-        let mut cleared_lines = self.0;
-        cleared_lines &= cleared_lines >> 8;
-        // 40bits -> 32bits
-        cleared_lines &= cleared_lines >> 4;
-        cleared_lines &= cleared_lines >> 8;
-        cleared_lines &= cleared_lines >> 16;
+    fn clear_lines(&self) -> (Self, u8) {
+         let cleared_lines = Self::full_rows(self.0);
         debug_assert!(cleared_lines <= 0xF);
+        // we only allow clear the last 4 lines
         let mut new_board = self.0;
         if cleared_lines & 8 != 0 {
-            new_board &= BitBoard::ROW_MASK * 7;
+            new_board = new_board & (BitBoard::ROW_MASK * 7) | (new_board & (BitBoard::ROW_MASK * 0x30)) >> 1;
         }
         if cleared_lines & 4 != 0 {
-            new_board = new_board & (BitBoard::ROW_MASK * 3) | (new_board & (BitBoard::ROW_MASK * 8)) >> 1;
+            new_board = new_board & (BitBoard::ROW_MASK * 3) | (new_board & (BitBoard::ROW_MASK * 0x38)) >> 1;
         }
         if cleared_lines & 2 != 0 {
-            new_board = new_board & (BitBoard::ROW_MASK) | (new_board & (BitBoard::ROW_MASK * 12)) >> 1;
+            new_board = new_board & (BitBoard::ROW_MASK) | (new_board & (BitBoard::ROW_MASK * 0x3C)) >> 1;
         }
         if cleared_lines & 1 != 0 {
-            new_board = (new_board & (BitBoard::ROW_MASK * 15)) >> 1;
+            new_board = (new_board & (BitBoard::ROW_MASK * 0x3F)) >> 1;
         }
-        (Self(new_board), cleared_lines.count_ones() as u64)
+        debug_assert!(new_board < Self::BOARD_MASK);
+        (Self(new_board), cleared_lines.count_ones() as u8)
     }
 }

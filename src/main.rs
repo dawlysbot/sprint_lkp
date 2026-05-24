@@ -1,3 +1,4 @@
+use env_logger;
 use std::env;
 use tetris_sprint_lkp::{
     search::BeamSearch, config::ReplayConfig, config::Metadata, config::MAX_PIECES
@@ -8,6 +9,7 @@ use tetris_sprint_lkp::bagrng::generate_piece_sequence;
 use tetris_sprint_lkp::replay::export_replay;
 
 fn main() {
+    env_logger::init();
     let args: Vec<String> = env::args().collect();
     
     let seed = if args.len() > 1 {
@@ -21,8 +23,9 @@ fn main() {
     println!("Seed: {}", seed);
     
     let piece_sequence = generate_piece_sequence(&seed, MAX_PIECES);
-    
     let result = BeamSearch::run(&piece_sequence);
+    println!("Find solution! result length = {}", result.len());
+
     let metadata = Metadata::default();
     let metadata_bin = serde_json::to_vec(&metadata).expect("Failed to serialize metadata");
 

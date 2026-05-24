@@ -1,21 +1,30 @@
 pub const TARGET_LINES: u16 = 40;
-pub const MAX_PIECES: usize = TARGET_LINES as usize * 5 / 2 + 1;
+pub const MAX_PIECES: usize = TARGET_LINES as usize * 5 / 2 + 2;
 
 pub const BEAM_WIDTH: usize = 1000;
 pub const ENDGAME_DEPTH: usize = 8;
+pub const ENDGAME_START: usize = MAX_PIECES - ENDGAME_DEPTH;
 
 pub const EVALUATE_DEPTH: usize = 4;
-pub struct Config {
-    pub flatness_weight: f64,
-    pub pit_penalty_weight: f64,
-    pub height_diff_penalty: f64,
+pub struct EvaluateConfig {
+    pub weight_hold: f64,
+    pub weight_i_tight: f64,
+    pub weight_i_tight_light: f64,
+    pub weight_bump: f64,
+    pub weight_bump_light: f64,
+    pub weight_height_warning: f64,
+    pub weight_height_danger: f64,
 }
-impl Default for Config {
+impl Default for EvaluateConfig {
     fn default() -> Self {
-        Config {
-            flatness_weight: 1.0,
-            pit_penalty_weight: 5.0,
-            height_diff_penalty: 3.0,
+        EvaluateConfig {
+            weight_hold: 2.4,
+            weight_i_tight: 3.0,
+            weight_i_tight_light: 3.0 * 0.25,
+            weight_bump: 0.6,
+            weight_bump_light: 0.6 * 0.3,
+            weight_height_warning: 1.5,
+            weight_height_danger: 6.0,
         }
     }
 }

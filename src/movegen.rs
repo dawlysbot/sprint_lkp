@@ -46,7 +46,7 @@ pub fn generate_moves<B: Board, S: ReplaySink>(moves: &mut ArrayVec<SearchNode<B
             replay.push(ReplayMove { hold: true, finesse_idx: 0, x: 0, reused: false, hold_only: true });
             continue;
         }
-        for (i, &finesse) in FINESSE_TABLE.iter().enumerate().take(SHAPE_RANGES[*piece as usize + 1]).skip(SHAPE_RANGES[*piece as usize]) {
+        for (i, &finesse) in FINESSE_TABLE.iter().enumerate().take(SHAPE_RANGES[*piece as usize]).skip(SHAPE_RANGES[*piece as usize - 1]) {
             // Generate moves based on the mask and the current node state
             let width = ((finesse >> 30) + 1) as u8;
             let mut finesse_data = finesse & 0x3FFFFFFF; // lower 30 bits for finesse data
@@ -63,7 +63,7 @@ pub fn generate_moves<B: Board, S: ReplaySink>(moves: &mut ArrayVec<SearchNode<B
                     }); }
                     replay.push(ReplayMove {
                         hold: node == &hold_node,
-                        finesse_idx: i - SHAPE_RANGES[*piece as usize] + FINESSE_RANGES[*piece as usize],
+                        finesse_idx: i - SHAPE_RANGES[*piece as usize - 1] + FINESSE_RANGES[*piece as usize],
                         x,
                         reused: reused != 0,
                         hold_only: false,
