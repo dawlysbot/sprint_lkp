@@ -94,7 +94,7 @@ fn rebuild_actions<B: Board>(node: &SearchNode<B>, piece: PieceType, result: &Se
     let rep = &replay[moves.iter().position(|&n| n == *result).unwrap()];
     let actions = if !rep.hold_only {
         let finesse = (if rep.reused { REUSE_TABLE.get(&(rep.finesse_idx, rep.x)) } else { None }).unwrap_or(&FINESSE_OP_TABLE[rep.finesse_idx][rep.x as usize]);
-        debug_assert!(!rep.reused || finesse[0] == (if rep.x <= 4 { Actions::MoveLeft } else { Actions::MoveRight }), "Reused move must be a das move in the correct direction");
+        debug_assert!(!rep.reused || finesse[0] == (if rep.x <= 4 { Actions::DasLeft } else { Actions::DasRight }), "Reused move must be a das move in the correct direction");
         finesse.clone()
     } else {
         debug_assert!(rep.hold, "Hold-only move must have hold=true");
@@ -119,6 +119,9 @@ pub fn rebuild_actions_general(n1: &PathNode, piece: PieceType, n2: &PathNode) -
 }
 
 fn parse_actions(str: &str) -> Vec<Actions> {
+    if str.is_empty() {
+        return Vec::new();
+    }
     str.split(',').map(|s| match s.trim() {
         "L" => Actions::MoveLeft,
         "R" => Actions::MoveRight,

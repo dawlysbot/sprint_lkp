@@ -57,7 +57,7 @@ pub fn evaluate(node: &SearchNode<ShapeBoard>, i_left: usize) -> f64 {
     if lines_cleared < TARGET_LINES - 4 {
         let normal_lines_left = TARGET_LINES - 4 - lines_cleared;
         let required_i = normal_lines_left.div_ceil(4) as usize; // allow the case that (TARGET_LINES - 4) % 4 != 0
-        let available_i = i_left + (node.meta >> 11 & 0x7 == PieceType::I as u16) as usize;
+        let available_i = i_left + (node.meta >> 11 == PieceType::I as u16) as usize;
         if available_i < required_i {
             return f64::INFINITY;
         }

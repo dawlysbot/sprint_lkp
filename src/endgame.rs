@@ -1,12 +1,7 @@
-use std::sync::{
-    atomic::{AtomicU16, Ordering},
-    Mutex,
-};
-
+use std::sync::{atomic::{AtomicU16, Ordering},Mutex};
 use arrayvec::ArrayVec;
 use rustc_hash::FxHashMap;
-
-use crate::bitboard::{BitBoard, SearchNode, LINES_CLEARED_MASK};
+use crate::{bitboard::{BitBoard, LINES_CLEARED_MASK, SearchNode}, config::ENDGAME_START};
 use crate::config::{ENDGAME_DEPTH, TARGET_LINES};
 use crate::movegen::{generate_moves, NoReplay};
 use crate::PieceType;
@@ -37,7 +32,7 @@ impl EndgameShared {
     }
 
     #[inline(always)]
-    fn best_keys(&self) -> u16 {
+    pub fn best_keys(&self) -> u16 {
         self.best_keys.load(Ordering::Relaxed)
     }
 
@@ -53,6 +48,11 @@ impl EndgameShared {
         let mut table = self.table[Self::shard(piece_pos, node.meta)].lock().unwrap();
         let key = node.state.raw();
         if table.get(&key).is_some_and(|&best| best <= node.keys_pressed) {
+            if (node.meta & LINES_CLEARED_MASK) * 10 != ((piece_pos + ENDGAME_START) as u16 - (node.meta >> 11 != 0) as u16) * 4 - node.state.occupied_cells() {
+                let heights = (0..10).map(|j| node.state.get_column(j)).collect::<Vec<_>>();
+                println!("PC Node meta: {:016b}, keys_pressed: {}, board: {:016x}, heights: {:?}", node.meta, node.keys_pressed, node.state.raw(), heights);
+                panic!("invalid node: piece_pos={}, endgame_start={}, meta={}, occupied_cells={}", piece_pos, ENDGAME_START, node.meta, node.state.occupied_cells());
+            }
             return false;
         }
         table.insert(key, node.keys_pressed);
@@ -64,28 +64,6 @@ impl Default for EndgameShared {
     fn default() -> Self {
         Self::new()
     }
-}
-
-#[inline(always)]
-fn lines_cleared<B: crate::bitboard::Board>(node: &SearchNode<B>) -> u16 {
-    node.meta & LINES_CLEARED_MASK
-}
-
-#[inline]
-fn min_remaining_pieces(board: BitBoard, lines: u16) -> u16 {
-    let remaining_lines = TARGET_LINES - lines;
-    if remaining_lines == 0 {
-        return 0;
-    }
-    // here we use saturating_sub since occupied cells may exceed remaining_lines * 10
-    (remaining_lines * 10).saturating_sub(board.occupied_cells()).div_ceil(4)
-}
-
-#[inline]
-fn cannot_supply_enough_cells(board: BitBoard, lines: u16, pieces_left: usize) -> bool {
-    let remaining_lines = TARGET_LINES - lines;
-    let needed_cells = remaining_lines as usize * 10;
-    board.occupied_cells() as usize + pieces_left * 4 < needed_cells
 }
 
 struct Dfs<'a> {
@@ -101,7 +79,7 @@ impl<'a> Dfs<'a> {
         piece_idx: usize,
         path: &mut ArrayVec<SearchNode<BitBoard>, ENDGAME_DEPTH>,
     ) {
-        let lines = lines_cleared(&node);
+        let lines = node.meta & LINES_CLEARED_MASK;
         if lines >= TARGET_LINES {
             let final_keys = path.last().map_or(node.keys_pressed, |n| n.keys_pressed);
             if self.best_path.is_empty()
@@ -119,14 +97,23 @@ impl<'a> Dfs<'a> {
         }
 
         let pieces_left = self.pieces.len() - piece_idx;
-        let min_pieces = min_remaining_pieces(node.state, lines);
+        let min_pieces = {
+            let remaining_lines = TARGET_LINES - lines;
+            if remaining_lines == 0 {
+                0
+            } else {
+                // here we use saturating_sub since occupied cells may exceed remaining_lines * 10
+                (remaining_lines * 10).saturating_sub(node.state.occupied_cells()).div_ceil(4)
+            }
+        };
         if min_pieces as usize > pieces_left {
             return;
         }
         if node.keys_pressed + min_pieces > self.shared.best_keys() {
             return;
         }
-        debug_assert!(!cannot_supply_enough_cells(node.state, lines, pieces_left), "the remaining pieces must be able to supply enough cells");
+        debug_assert!(node.state.occupied_cells() as usize + pieces_left * 4 >= (TARGET_LINES - lines) as usize * 10,
+                      "the remaining pieces must be able to supply enough cells");
 
         if !self.shared.visit(piece_idx, &node) {
             return;
@@ -135,8 +122,9 @@ impl<'a> Dfs<'a> {
         let mut moves: ArrayVec<SearchNode<BitBoard>, 68> = ArrayVec::new();
         generate_moves(&mut moves, &mut NoReplay, &node, self.pieces[piece_idx], path.len());
         moves.sort_unstable_by_key(|node| {
-            let cleared = (lines_cleared(node) - lines) as u8;
-            (cleared == 0, node.keys_pressed, u8::MAX - cleared)
+            let cleared = ((node.meta & LINES_CLEARED_MASK) - lines) as u8;
+            // no hole first, then clear lines, then fewer keys pressed, then cleared more lines
+            (!node.state.raw() & ((node.state.raw() & (BitBoard::ROW_MASK * 0x3E)) >> 1) != 0, cleared == 0, node.keys_pressed, u8::MAX - cleared)
         });
 
         for next in moves {
@@ -157,7 +145,7 @@ pub fn solve_pc(
     shared: &EndgameShared,
 ) -> ArrayVec<SearchNode<BitBoard>, ENDGAME_DEPTH> {
     debug_assert!(
-        lines_cleared(&board) >= TARGET_LINES - 4,
+        (board.meta & LINES_CLEARED_MASK) >= TARGET_LINES - 4,
         "Endgame solver only works when at most 4 lines remain"
     );
     let mut dfs = Dfs {

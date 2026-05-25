@@ -45,6 +45,7 @@ impl BeamSearch {
             let parent_idx = current_node.parent_idx;
             current_node = layers[d - 1][parent_idx];
         }
+        path.push(current_node);
         path.reverse();
         path
     }
@@ -89,7 +90,7 @@ impl BeamSearch {
         layers[0].push(SearchNode::<ShapeBoard>::initial());
 
         for depth in 0..max_depth {
-            debug!("Depth {}: layer size = {}, best keys pressed = {}", depth, layers[depth].len(), best_path.last().map_or(0, |node| node.keys_pressed()));
+            debug!("Depth {}: layer size = {}", depth, layers[depth].len());
             if let Some(best) = best_path.last() {
                 endgame_shared.set_best(best.keys_pressed());
             }
@@ -112,6 +113,7 @@ impl BeamSearch {
                                 pc_sequence: solution,
                             };
                             if local_replay.is_empty() || final_keys < local_replay[0].keys_pressed {
+                                debug!("Found new best path with {} keys pressed at depth {}, idx {}, updating replay", final_keys, depth, idx);
                                 local_replay.clear();
                                 local_replay.push(path);
                             } else if final_keys == local_replay[0].keys_pressed {

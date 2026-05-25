@@ -71,8 +71,8 @@ impl Iterator for ShuffleSequence {
     }
 }
 
-pub fn generate_piece_sequence(seed: &str, count: usize) -> Vec<PieceType> {
-    let seed_val = seed.parse::<u64>().unwrap();
+pub fn generate_piece_sequence(seed: &u32, count: usize) -> Vec<PieceType> {
+    let seed_val = *seed as u64;
     let mut rng = ShuffleSequence::new(seed_val);
     let mut seq = Vec::with_capacity(count);
     for _ in 0..count {

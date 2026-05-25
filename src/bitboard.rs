@@ -59,11 +59,14 @@ const fn encode_finesse_data(operations: [u8; 10], reuse: u32) -> u32 {
         rightmost -= 1;
     }
     let mut mask = 0u32;
-    let mut i = 0;
-    while i <= rightmost {
+    let mut i = rightmost;
+    loop {
         debug_assert!(operations[i] <= 0b11, "Operation value must be between 0 and 3");
         mask = mask << 3 | (operations[i] as u32) | (reuse >> (rightmost - i) as u32 & 1u32) << 2;
-        i += 1;
+        if i == 0 {
+            break;
+        }
+        i -= 1;
     }
     mask
 }
@@ -73,11 +76,14 @@ const fn raw_pack(width: u8, bottom: [u8; 4], max_height: u8, added_mask: u32, o
     let parsed_added_mask = {
         let mut mask = 0;
         let mut i = 0;
+        let mut cells = 0;
         while i < width {
             let col_mask = (added_mask >> (4 * (width - 1 - i))) & 0xF;
-            mask |= col_mask << (6 * i);
+            mask |= col_mask << (5 * i);
+            cells += col_mask;
             i += 1;
         }
+        assert!(cells == 4, "added_mask must have exactly 4 cells");
         mask
     };
     let packed = ((width - 1) as u32)
@@ -130,7 +136,7 @@ const fn shape_to_bit(arr: &[FastMask; 19]) -> [u32; 19] {
         let mut x = 0;
         while x <= (mask.0 & 0b11) {
             let bottom = mask.0 >> (2 + 2 * x) & 0b11;
-            let height = mask.0 >> 12 >> (6 * x) & 0xF;
+            let height = mask.0 >> 12 >> (5 * x) & 0xF;
             if max_height < height + bottom {
                 max_height = height + bottom;
             }
@@ -138,6 +144,7 @@ const fn shape_to_bit(arr: &[FastMask; 19]) -> [u32; 19] {
             // The highest shape bit is below bit 24, so bits 24-26 store the max height.
             x += 1;
         }
+        assert!(bit_mask.count_ones() == 4, "Each shape must have exactly 4 cells");
         bit_arr[i] = bit_mask | max_height << 24;
         i += 1;
     }
@@ -257,15 +264,11 @@ impl BoardInternal for ShapeBoard {
 pub struct BitBoard(u64);
 impl BitBoard {
     const BOARD_MASK: u64 = 0x0FFF_FFFF_FFFF_FFFF;
-    const ROW_MASK: u64 = 0x0041_0410_4104_1041;
+    pub const ROW_MASK: u64 = 0x0041_0410_4104_1041;
     const COL_MASK: u64 = 0x3F;
     #[inline(always)]
     pub fn get_column(&self, col: usize) -> u64 {
         self.0 >> (col * 6) & Self::COL_MASK
-    }
-    #[inline(always)]
-    pub fn is_empty(&self) -> bool {
-        self.0 == 0
     }
     #[inline(always)]
     pub fn raw(&self) -> u64 {
@@ -318,15 +321,20 @@ impl BoardInternal for BitBoard {
             }
             height -= 1;
         }
+        debug_assert!(self.0 & (mask << height) == 0);
         let placed = self.0 | (mask << height);
         debug_assert!(placed < Self::BOARD_MASK);
         Some(Self(placed))
     }
     fn clear_lines(&self) -> (Self, u8) {
-         let cleared_lines = Self::full_rows(self.0);
-        debug_assert!(cleared_lines <= 0xF);
-        // we only allow clear the last 4 lines
+        let cleared_lines = Self::full_rows(self.0);
         let mut new_board = self.0;
+        if cleared_lines & 32 != 0 {
+            new_board &= BitBoard::ROW_MASK * 0x1F;
+        }
+        if cleared_lines & 16 != 0 {
+            new_board = new_board & (BitBoard::ROW_MASK * 0xF) | (new_board & (BitBoard::ROW_MASK * 0x20)) >> 1;
+        }
         if cleared_lines & 8 != 0 {
             new_board = new_board & (BitBoard::ROW_MASK * 7) | (new_board & (BitBoard::ROW_MASK * 0x30)) >> 1;
         }
@@ -337,7 +345,7 @@ impl BoardInternal for BitBoard {
             new_board = new_board & (BitBoard::ROW_MASK) | (new_board & (BitBoard::ROW_MASK * 0x3C)) >> 1;
         }
         if cleared_lines & 1 != 0 {
-            new_board = (new_board & (BitBoard::ROW_MASK * 0x3F)) >> 1;
+            new_board = (new_board & (BitBoard::ROW_MASK * 0x3E)) >> 1;
         }
         debug_assert!(new_board < Self::BOARD_MASK);
         (Self(new_board), cleared_lines.count_ones() as u8)

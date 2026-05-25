@@ -1,3 +1,4 @@
+use log::debug;
 use crate::PieceType;
 use crate::config::{ReplayConfig, MAX_PIECES};
 use crate::movegen::rebuild_actions_general;
@@ -49,6 +50,7 @@ fn compile_path(path: &[PathNode], piece_sequence: &[PieceType], das_frame: u32,
         push_down(ops, *ts, ev);
         *ts += tap_wait;
         push_up(ops, *ts, ev);
+        *ts += tap_wait;
         if ev == ReplayEvent::HardDrop {
             *ts += 1;
         }
@@ -56,31 +58,55 @@ fn compile_path(path: &[PathNode], piece_sequence: &[PieceType], das_frame: u32,
 
     let mut active_das: Option<ReplayEvent> = None;
     let mut is_first = true;
+    let mut last_is_hold_only = false;
     for i in 0..path.len()-1 {
         let (reused, hold, hold_only, actions) = rebuild_actions_general(&path[i], piece_sequence[i], &path[i + 1]);
+        if !is_first {
+            if !hold_only {
+                if !reused {
+                    if let Some(das_key) = active_das {
+                        push_up(&mut operations, timestamp, das_key);
+                        active_das = None;
+                    }
+                } else {
+                    debug_assert!(active_das.is_some(), "Cannot reuse move when inactive DAS");
+                    debug_assert!(actions[0] == Actions::DasLeft && active_das == Some(ReplayEvent::MoveLeft)
+                            || actions[0] == Actions::DasRight && active_das == Some(ReplayEvent::MoveRight),
+                            "Reused move must match active DAS");
+                }
+            }
+            if !last_is_hold_only {
+                tap(&mut operations, &mut timestamp, ReplayEvent::HardDrop);
+            }
+        }
+        is_first = false;
+        if operations.len() + 2 * (active_das.is_some() as usize) != 4 * path[i].keys_pressed() as usize {
+            debug!("Generated operations length {} does not match expected length {} before processing move {}",
+                   operations.len(), 4 * path[i].keys_pressed() as usize, i);
+            debug!("Generated operations: {:?}", operations.iter().map(|&x| -> i32 { if x < 32 || x >= 175 { x as i32 } else { -(x as i32 - 32) } }).collect::<Vec<_>>());
+            debug!("current piece: {}, reused: {}, hold: {}", piece_sequence[i] as u8, reused, hold);
+            match path[i] {
+                PathNode::Normal(node) => {
+                    let heights = (0..10).map(|j| node.state.get_height(j)).collect::<Vec<_>>();
+                    debug!("Node meta: {:016b}, keys_pressed: {}, board: {:016x}, heights: {:?}", node.meta, node.keys_pressed, node.state.packed_shape, heights);
+                }
+                PathNode::Pc(node) => {
+                    let heights = (0..10).map(|j| node.state.get_column(j)).collect::<Vec<_>>();
+                    debug!("PC Node meta: {:016b}, keys_pressed: {}, board: {:016x}, heights: {:?}", node.meta, node.keys_pressed, node.state.raw(), heights);
+                }
+            }
+        }
+        debug_assert!(operations.len() + 2 * (active_das.is_some() as usize) == 4 * path[i].keys_pressed() as usize, "Operations length must be four times the current keys pressed before processing next move");
         if hold_only {
             debug_assert!(actions.is_empty(), "Hold-only move should have no actions");
             // hold_only means this step only has one hold action but not drop
             // theoretically the game do not allow double-hold, but it's possible for our replay, such as hold_only -> hold -> harddrop
             // but this sequence is not optimal (we can directly harddrop -> hold_only), so we allow it for simplicity.
             tap(&mut operations, &mut timestamp, ReplayEvent::Hold);
+            last_is_hold_only = true;
             continue;
         }
-        if !is_first {
-            if !reused {
-                if let Some(das_key) = active_das {
-                    push_up(&mut operations, timestamp, das_key);
-                    active_das = None;
-                }
-            } else {
-                debug_assert!(active_das.is_some(), "Cannot reuse move when inactive DAS");
-                debug_assert!(actions[0] == Actions::MoveLeft && active_das == Some(ReplayEvent::MoveLeft)
-                           || actions[0] == Actions::MoveRight && active_das == Some(ReplayEvent::MoveRight),
-                           "Reused move must match active DAS");
-            }
-            tap(&mut operations, &mut timestamp, ReplayEvent::HardDrop);
-        }
-        is_first = false;
+        last_is_hold_only = false;
         if hold {
             tap(&mut operations, &mut timestamp, ReplayEvent::Hold);
         }
@@ -135,7 +161,11 @@ fn compile_path(path: &[PathNode], piece_sequence: &[PieceType], das_frame: u32,
         push_up(&mut operations, timestamp, das_key);
     }
     tap(&mut operations, &mut timestamp, ReplayEvent::HardDrop);
-    debug_assert!(operations.len() == path.last().unwrap().keys_pressed() as usize * 2, "Operations length must be twice the number of keys pressed");
+    if operations.len() != 4 * path.last().unwrap().keys_pressed() as usize {
+        debug!("Generated operations length {} does not match expected length {}", operations.len(), 4 * path.last().unwrap().keys_pressed() as usize);
+        debug!("Generated operations: {:?}", operations.iter().map(|&x| -> i32 { if x < 32 || x >= 175 { x as i32 } else { -(x as i32 - 32) } }).collect::<Vec<_>>());
+    }
+    debug_assert!(operations.len() == path.last().unwrap().keys_pressed() as usize * 4, "Operations length must be four times the number of keys pressed");
     operations
 }
 
@@ -147,11 +177,16 @@ pub fn export_replay(path: &[PathNode], piece_sequence: &[PieceType], das_frame:
         if i > 0 && i % 2 == 0 {
             x -= path_data[i - 2];
         }
+        let mut tmp = Vec::new();
         while x >= 128 {
-            bytes.push(((x & 0x7F) | 0x80) as u8);
+            tmp.push((x & 0x7F) as u8);
             x /= 128;
         }
-        bytes.push(x as u8);
+        tmp.push(x as u8);
+        for i in 1..tmp.len() {
+            tmp[i] += 128;
+        }
+        bytes.extend(tmp.into_iter().rev());
     }
     bytes
 }

@@ -1,8 +1,8 @@
 pub const TARGET_LINES: u16 = 40;
 pub const MAX_PIECES: usize = TARGET_LINES as usize * 5 / 2 + 2;
 
-pub const BEAM_WIDTH: usize = 1000;
-pub const ENDGAME_DEPTH: usize = 8;
+pub const BEAM_WIDTH: usize = 5000;
+pub const ENDGAME_DEPTH: usize = 6;
 pub const ENDGAME_START: usize = MAX_PIECES - ENDGAME_DEPTH;
 
 pub const EVALUATE_DEPTH: usize = 4;
@@ -37,7 +37,7 @@ pub struct ReplayConfig {
 impl Default for ReplayConfig {
     fn default() -> Self {
         ReplayConfig {
-            first_op: 175,
+            first_op: 180,
             das_ratio: 1.5,
             short_ratio: 0.5,
         }
@@ -84,7 +84,8 @@ pub struct Metadata {
     pub setting: Setting,
     pub date: String,
     pub tas_used: bool,
-    pub seed: u64,
+    pub seed: u32,
+    #[serde(rename = "mod")]
     pub mod_list: Vec<String>,
     pub mode: String,
 }
@@ -131,7 +132,7 @@ impl Default for Metadata {
             },
             date: "2026/06/26 06:26:26".to_string(),
             tas_used: false,
-            seed: 1866555892u64,
+            seed: 1866555892u32,
             mod_list: Vec::new(),
             mode: format!("sprint_{}l", TARGET_LINES),
         }
