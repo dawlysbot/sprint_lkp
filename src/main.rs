@@ -32,9 +32,10 @@ fn main() {
     let piece_sequence = generate_piece_sequence(&seed, MAX_PIECES);
     assert!(piece_sequence[0] != PieceType::S && piece_sequence[0] != PieceType::Z, "The first piece cannot be S or Z");
     assert!(piece_sequence[0] != PieceType::O || piece_sequence[1] != PieceType::S && piece_sequence[1] != PieceType::Z, "When the first piece is O, the second piece cannot be S or Z");
-    println!("Seed: {}", seed);
 
     let result = BeamSearch::run(&piece_sequence);
+
+    println!("Seed: {}", seed);
     println!("Find solution! result length = {}, pressed keys = {}", result.len(), result.last().unwrap().keys_pressed());
 
     let mut metadata = Metadata::default();

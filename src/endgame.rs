@@ -48,11 +48,7 @@ impl EndgameShared {
         let mut table = self.table[Self::shard(piece_pos, node.meta)].lock().unwrap();
         let key = node.state.raw();
         if table.get(&key).is_some_and(|&best| best <= node.keys_pressed) {
-            if (node.meta & LINES_CLEARED_MASK) * 10 != ((piece_pos + ENDGAME_START) as u16 - (node.meta >> 11 != 0) as u16) * 4 - node.state.occupied_cells() {
-                let heights = (0..10).map(|j| node.state.get_column(j)).collect::<Vec<_>>();
-                println!("PC Node meta: {:016b}, keys_pressed: {}, board: {:016x}, heights: {:?}", node.meta, node.keys_pressed, node.state.raw(), heights);
-                panic!("invalid node: piece_pos={}, endgame_start={}, meta={}, occupied_cells={}", piece_pos, ENDGAME_START, node.meta, node.state.occupied_cells());
-            }
+            debug_assert!((node.meta & LINES_CLEARED_MASK) * 10 == ((piece_pos + ENDGAME_START) as u16 - (node.meta >> 11 != 0) as u16) * 4 - node.state.occupied_cells());
             return false;
         }
         table.insert(key, node.keys_pressed);

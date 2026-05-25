@@ -61,6 +61,14 @@ fn compile_path(path: &[PathNode], piece_sequence: &[PieceType], das_frame: u32,
     let mut last_is_hold_only = false;
     for i in 0..path.len()-1 {
         let (reused, hold, hold_only, actions) = rebuild_actions_general(&path[i], piece_sequence[i], &path[i + 1]);
+        if hold_only {
+            debug_assert!(actions.is_empty(), "Hold-only move should have no actions");
+            // hold_only means this step only has one hold action but not drop
+            // theoretically the game do not allow double-hold, but it's possible for our replay, such as hold_only -> hold -> harddrop
+            // but this sequence is not optimal (we can directly harddrop -> hold_only), so we allow it for simplicity.
+            last_is_hold_only = true;
+            continue;
+        }
         if !is_first {
             if !hold_only {
                 if !reused {
@@ -75,10 +83,14 @@ fn compile_path(path: &[PathNode], piece_sequence: &[PieceType], das_frame: u32,
                             "Reused move must match active DAS");
                 }
             }
-            if !last_is_hold_only {
-                tap(&mut operations, &mut timestamp, ReplayEvent::HardDrop);
+            tap(&mut operations, &mut timestamp, ReplayEvent::HardDrop);
+            if last_is_hold_only {
+                tap(&mut operations, &mut timestamp, ReplayEvent::Hold);
             }
+        } else if last_is_hold_only {
+            tap(&mut operations, &mut timestamp, ReplayEvent::Hold);
         }
+        last_is_hold_only = false;
         is_first = false;
         if operations.len() + 2 * (active_das.is_some() as usize) != 4 * path[i].keys_pressed() as usize {
             debug!("Generated operations length {} does not match expected length {} before processing move {}",
@@ -95,18 +107,8 @@ fn compile_path(path: &[PathNode], piece_sequence: &[PieceType], das_frame: u32,
                     debug!("PC Node meta: {:016b}, keys_pressed: {}, board: {:016x}, heights: {:?}", node.meta, node.keys_pressed, node.state.raw(), heights);
                 }
             }
+            panic!();
         }
-        debug_assert!(operations.len() + 2 * (active_das.is_some() as usize) == 4 * path[i].keys_pressed() as usize, "Operations length must be four times the current keys pressed before processing next move");
-        if hold_only {
-            debug_assert!(actions.is_empty(), "Hold-only move should have no actions");
-            // hold_only means this step only has one hold action but not drop
-            // theoretically the game do not allow double-hold, but it's possible for our replay, such as hold_only -> hold -> harddrop
-            // but this sequence is not optimal (we can directly harddrop -> hold_only), so we allow it for simplicity.
-            tap(&mut operations, &mut timestamp, ReplayEvent::Hold);
-            last_is_hold_only = true;
-            continue;
-        }
-        last_is_hold_only = false;
         if hold {
             tap(&mut operations, &mut timestamp, ReplayEvent::Hold);
         }
@@ -161,10 +163,6 @@ fn compile_path(path: &[PathNode], piece_sequence: &[PieceType], das_frame: u32,
         push_up(&mut operations, timestamp, das_key);
     }
     tap(&mut operations, &mut timestamp, ReplayEvent::HardDrop);
-    if operations.len() != 4 * path.last().unwrap().keys_pressed() as usize {
-        debug!("Generated operations length {} does not match expected length {}", operations.len(), 4 * path.last().unwrap().keys_pressed() as usize);
-        debug!("Generated operations: {:?}", operations.iter().map(|&x| -> i32 { if x < 32 || x >= 175 { x as i32 } else { -(x as i32 - 32) } }).collect::<Vec<_>>());
-    }
     debug_assert!(operations.len() == path.last().unwrap().keys_pressed() as usize * 4, "Operations length must be four times the number of keys pressed");
     operations
 }

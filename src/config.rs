@@ -1,11 +1,13 @@
-pub const TARGET_LINES: u16 = 40;
-pub const MAX_PIECES: usize = TARGET_LINES as usize * 5 / 2 + 2;
+pub const TARGET_LINES: u16 = 400;
+pub const ALLOW_HOLD: bool = true;
+pub const PC_END: bool = false;
+pub const MAX_PIECES: usize = TARGET_LINES as usize * 5 / 2 + (ALLOW_HOLD as usize) + (!PC_END as usize);
 
-pub const BEAM_WIDTH: usize = 5000;
-pub const ENDGAME_DEPTH: usize = 6;
+pub const BEAM_WIDTH: usize = 10000;
+pub const ENDGAME_DEPTH: usize = 7;
 pub const ENDGAME_START: usize = MAX_PIECES - ENDGAME_DEPTH;
 
-pub const EVALUATE_DEPTH: usize = 4;
+pub const EVALUATE_DEPTH: usize = 5;
 pub struct EvaluateConfig {
     pub weight_hold: f64,
     pub weight_i_tight: f64,
@@ -18,12 +20,12 @@ pub struct EvaluateConfig {
 impl Default for EvaluateConfig {
     fn default() -> Self {
         EvaluateConfig {
-            weight_hold: 2.4,
+            weight_hold: 2.0,
             weight_i_tight: 3.0,
             weight_i_tight_light: 3.0 * 0.25,
             weight_bump: 0.6,
-            weight_bump_light: 0.6 * 0.3,
-            weight_height_warning: 1.5,
+            weight_bump_light: 0.6 * 0.35,
+            weight_height_warning: 0.7,
             weight_height_danger: 6.0,
         }
     }
@@ -38,7 +40,7 @@ impl Default for ReplayConfig {
     fn default() -> Self {
         ReplayConfig {
             first_op: 180,
-            das_ratio: 1.5,
+            das_ratio: 1.2,
             short_ratio: 0.5,
         }
     }
@@ -92,14 +94,14 @@ pub struct Metadata {
 impl Default for Metadata {
     fn default() -> Self {
         const {
-            debug_assert!(TARGET_LINES == 10 || TARGET_LINES == 20 || TARGET_LINES == 40 || TARGET_LINES == 100 || TARGET_LINES == 200 || TARGET_LINES == 400,
-                      "Metadata::default is only valid 10/20/40/100/200/400 sprint");
+            debug_assert!(TARGET_LINES == 10 || TARGET_LINES == 20 || TARGET_LINES == 40 || TARGET_LINES == 100 || TARGET_LINES == 400,
+                      "Metadata::default is only valid 10/20/40/100/400 sprint");
         }
         Metadata {
             player: "LKPbot".to_string(),
             version: "V0.17.14".to_string(),
             setting: Setting {
-                das: 5,
+                das: 7,
                 arr: 0,
                 sddas: 0,
                 sdarr: 0,

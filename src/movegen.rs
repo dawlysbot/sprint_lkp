@@ -1,5 +1,6 @@
 use crate::PieceType;
 use crate::bitboard::{Board, SearchNode, HOLD_MASK, DAS_MASK, LINES_CLEARED_MASK, SHAPE_RANGES, FINESSE_TABLE};
+use crate::config::ALLOW_HOLD;
 use core::str;
 use std::collections::HashMap;
 use once_cell::sync::Lazy;
@@ -55,6 +56,7 @@ pub fn generate_moves<B: Board, S: ReplaySink>(moves: &mut ArrayVec<SearchNode<B
                 if let Some(new_state) = node.state.drop_piece(x, i as u8, meta_nodas & LINES_CLEARED_MASK) {
                     let reused = ((finesse_data & 0b100) >> 2) & (node.meta as u32 >> (9 + (x > 4) as u8));
                     // node.meta's bit 9-10 represent the das state, x>4 means right side
+                    debug_assert!(((meta_nodas & LINES_CLEARED_MASK) + new_state.1 as u16) < (1 << 9), "Lines cleared should be less than 512");
                     unsafe { moves.push_unchecked(SearchNode {
                         state: new_state.0,
                         meta: (meta_nodas + new_state.1 as u16) | ((x == 0) as u16) << 9 | ((x == 10 - width) as u16) << 10,
@@ -71,6 +73,9 @@ pub fn generate_moves<B: Board, S: ReplaySink>(moves: &mut ArrayVec<SearchNode<B
                 }
                 finesse_data >>= 3;
             }
+        }
+        if !ALLOW_HOLD {
+            break; // if hold is not allowed, we only generate moves for the original piece
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::config::TARGET_LINES;
+use crate::config::{PC_END, TARGET_LINES};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SearchNode<B: Board> {
@@ -8,6 +8,8 @@ pub struct SearchNode<B: Board> {
     // note that, for search::hash, we will use state (50bit) | meta (14bit).
     // 0-8: lines cleared, 9-10: das state, 11-13: hold piece
     // so only support 511 lines
+    // actually, lines_cleared*10=(depth-(hold.is_some))*4-occupied_cells, so we may not store this in meta.
+    // in that case, we can support more lines, e.g. 1000 lines.
     pub parent_idx: usize,
 }
 pub const HOLD_MASK: u16 = 0x3800;
@@ -172,18 +174,18 @@ pub const BIT_TABLE: [u32; 19] = shape_to_bit(&SHAPE_TABLE);
 
 pub trait Board: Clone + Copy + PartialEq + Eq + std::hash::Hash + Default {
     const QUAD_ONLY: bool = true;
-    fn drop_piece(&self, x: u8, piece_idx: u8, lines_cleared: u16) -> Option<(Self, u8)>;
+    fn drop_piece(&self, x: u8, shape_idx: u8, lines_cleared: u16) -> Option<(Self, u8)>;
 }
 trait BoardInternal: Sized {
     const QUAD_ONLY: bool = true;
-    fn try_place(&self, x: u8, piece_idx: u8, lines_cleared: u16) -> Option<Self>;
+    fn try_place(&self, x: u8, shape_idx: u8, lines_cleared: u16) -> Option<Self>;
     fn clear_lines(&self) -> (Self, u8);
 }
 impl<B> Board for B where B: BoardInternal + Clone + Copy + PartialEq + Eq + std::hash::Hash + Default {
     const QUAD_ONLY: bool = B::QUAD_ONLY;
     #[inline]
-    fn drop_piece(&self, x: u8, piece_idx: u8, lines_cleared: u16) -> Option<(Self, u8)> {
-        let placed = self.try_place(x, piece_idx, lines_cleared)?;
+    fn drop_piece(&self, x: u8, shape_idx: u8, lines_cleared: u16) -> Option<(Self, u8)> {
+        let placed = self.try_place(x, shape_idx, lines_cleared)?;
         let (cleared_board, lines) = placed.clear_lines();
         
         if Self::QUAD_ONLY && lines_cleared <= TARGET_LINES - 4 && lines != 0 && lines != 4 {
@@ -206,8 +208,8 @@ impl ShapeBoard {
 }
 impl BoardInternal for ShapeBoard {
     #[inline(always)]
-    fn try_place(&self, x: u8, piece_idx: u8, lines_cleared: u16) -> Option<Self> {
-        let mask = &SHAPE_TABLE[piece_idx as usize];
+    fn try_place(&self, x: u8, shape_idx: u8, lines_cleared: u16) -> Option<Self> {
+        let mask = &SHAPE_TABLE[shape_idx as usize];
         debug_assert!(x + mask.width() <= 10);
 
         let shift = x * 5;
@@ -233,7 +235,7 @@ impl BoardInternal for ShapeBoard {
             if h3 < b3 || h3 - b3 != base_y { return None; }
         }
 
-        if base_y + mask.max_height() > 20 || base_y + mask.max_height() > (TARGET_LINES - lines_cleared) as u8 {
+        if base_y + mask.max_height() > 20 || (base_y + mask.max_height()) as u16 > TARGET_LINES - lines_cleared {
             return None;
         }
 
@@ -302,9 +304,10 @@ impl BitBoard {
 }
 impl BoardInternal for BitBoard {
     const QUAD_ONLY: bool = false;
-    fn try_place(&self, x: u8, piece_idx: u8, lines_cleared: u16) -> Option<Self> {
-        let shape = BIT_TABLE[piece_idx as usize];
-        let mut height = (((TARGET_LINES - lines_cleared) as u8) + 2).checked_sub((shape >> 24) as u8)?;
+    fn try_place(&self, x: u8, shape_idx: u8, lines_cleared: u16) -> Option<Self> {
+        let shape = BIT_TABLE[shape_idx as usize];
+        debug_assert!(TARGET_LINES - lines_cleared <= 4);
+        let mut height = (((TARGET_LINES - lines_cleared) as u8) + {2 * !PC_END as u8}).checked_sub((shape >> 24) as u8)?;
         // means the highest row of the piece can be put
         let mask = ((shape as u64) & 0xFFFFFF) << (x * 6);
         // hit check: if I put the piece at height, compute the hitbox

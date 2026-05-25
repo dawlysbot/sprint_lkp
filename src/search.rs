@@ -71,11 +71,29 @@ impl BeamSearch {
             }
             das_moves
         }
-        if count_das_moves(piece_sequence, a) > count_das_moves(piece_sequence, &b_seq) {
-            Some(b_seq)
-        } else {
-            None
+        let cnt_a = count_das_moves(piece_sequence, a);
+        let cnt_b = count_das_moves(piece_sequence, &b_seq);
+        if cnt_a != cnt_b {
+            return (cnt_a > cnt_b).then_some(b_seq);
         }
+        fn count_clear_ops(path: &[PathNode]) -> u16 {
+            // count the number of clear line operations
+            let mut clear_ops = 0;
+            for i in 0..path.len()-1 {
+                let clear_a = path[i].meta() & LINES_CLEARED_MASK;
+                let clear_b = path[i + 1].meta() & LINES_CLEARED_MASK;
+                if clear_b > clear_a {
+                    clear_ops += 1;
+                }
+            }
+            clear_ops
+        }
+        let clear_a = count_clear_ops(a);
+        let clear_b = count_clear_ops(&b_seq);
+        if clear_a != clear_b {
+            return (clear_a < clear_b).then_some(b_seq);
+        }
+        None
     }
     pub fn run(piece_sequence: &[PieceType]) -> Vec<PathNode> {
     // result format: null state (board=0) at index 0, step i: takes piece_sequence[i], then go to step i+1, so |result| = |piece_sequence| + 1
