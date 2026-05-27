@@ -1,3 +1,11 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Dawlysbot
+ *
+ * This solver is an independent implementation inspired by the logic of
+ * Techmino (LGPL-3.0). No code from the original game is used.
+ */
+
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use std::io::Write;
