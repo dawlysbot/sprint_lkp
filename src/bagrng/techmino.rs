@@ -12,11 +12,9 @@ impl XorShift64Star {
         };
         key = (!key).wrapping_add(key.wrapping_shl(21)); // key = (key << 21) - key - 1;
         key ^= key.wrapping_shr(24);
-        key = key.wrapping_add(key.wrapping_shl(3))
-           .wrapping_add(key.wrapping_shl(8)); // key * 265
+        key = key.wrapping_mul(265);
         key ^= key.wrapping_shr(14);
-        key = key.wrapping_add(key.wrapping_shl(2))
-           .wrapping_add(key.wrapping_shl(4)); // key * 21
+        key = key.wrapping_mul(21);
         key ^= key.wrapping_shr(28);
         key = key.wrapping_add(key.wrapping_shl(31));
         XorShift64Star { state: key }
@@ -71,8 +69,8 @@ impl Iterator for ShuffleSequence {
     }
 }
 
-pub fn generate_piece_sequence(seed: &u32, count: usize) -> Vec<PieceType> {
-    let seed_val = *seed as u64;
+pub fn generate_piece_sequence(seed: &String, count: usize) -> Vec<PieceType> {
+    let seed_val = seed.parse::<u32>().unwrap() as u64;
     let mut rng = ShuffleSequence::new(seed_val);
     let mut seq = Vec::with_capacity(count);
     for _ in 0..count {
