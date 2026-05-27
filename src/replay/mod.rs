@@ -31,7 +31,6 @@ pub trait ReplayConsumer {
     fn tap(&mut self, action: ActionKind);
     fn das_start(&mut self, dir: ActionKind);
     fn das_release(&mut self, dir: ActionKind);
-    fn das_reuses(&mut self, dir: ActionKind);
     fn debug_keys_assertion(&self, _i: usize, _path: &[PathNode], _piece: PieceType, _active_das: Option<ActionKind>, _reused: bool, _hold: bool);
 }
 
@@ -71,35 +70,21 @@ fn compile_path<C: ReplayConsumer>(path: &[PathNode], piece_sequence: &[PieceTyp
             if last_is_hold_only {
                 consumer.tap(ActionKind::Hold);
             }
-            if reused {
-                consumer.das_reuses(active_das.unwrap());
-            }
         } else if last_is_hold_only {
             consumer.tap(ActionKind::Hold);
-            active_das.map(|dir| { consumer.das_reuses(dir); });
         }
         last_is_hold_only = false;
         is_first = false;
         consumer.debug_keys_assertion(i, path, piece_sequence[i], active_das, reused, hold);
         if hold {
             consumer.tap(ActionKind::Hold);
-            active_das.map(|dir| { consumer.das_reuses(dir); });
         }
         for &action in actions[reused as usize..].iter() { // if reused, skip first Das
             match action {
-                Actions::RotateCW => {
-                    consumer.tap(ActionKind::RotateCW);
-                    active_das.map(|dir| { consumer.das_reuses(dir); });
-                    // for jstris replay, after every rotation we should apply the das
-                }
-                Actions::RotateCCW => {
-                    consumer.tap(ActionKind::RotateCCW);
-                    active_das.map(|dir| { consumer.das_reuses(dir); });
-                }
-                Actions::Rotate180 => {
-                    consumer.tap(ActionKind::Rotate180);
-                    active_das.map(|dir| { consumer.das_reuses(dir); });
-                }
+                Actions::RotateCW => consumer.tap(ActionKind::RotateCW),
+                // for jstris replay, after every rotation we should apply the das
+                Actions::RotateCCW => consumer.tap(ActionKind::RotateCCW),
+                Actions::Rotate180 => consumer.tap(ActionKind::Rotate180),
                 Actions::MoveLeft => {
                     debug_assert!(active_das.is_none(), "Cannot have press when active DAS");
                     consumer.tap(ActionKind::MoveLeft);

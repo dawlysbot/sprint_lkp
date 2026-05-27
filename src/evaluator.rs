@@ -1,8 +1,24 @@
 use crate::PieceType;
 use crate::config::{EvaluateConfig, TARGET_LINES};
-use crate::bitboard::{Board, ShapeBoard, SearchNode};
+use crate::bitboard::{Board, DAS_MASK, SearchNode, ShapeBoard};
 use crate::bitboard::{HOLD_MASK, LINES_CLEARED_MASK};
 
+pub fn get_well(board: ShapeBoard) -> usize {
+    if board.get_height(6) == 0 {
+        return 6;
+    }
+    if board.get_height(9) == 0 {
+        return 9;
+    }
+    if board.get_height(3) == 0 {
+        return 3;
+    }
+    let mut well = 0;
+    while well < 10 && board.get_height(well) != 0 {
+        well += 1;
+    }
+    well
+}
 pub fn evaluate(node: &SearchNode<ShapeBoard>, i_left: usize) -> f64 {
 // the smaller the score, the better the node
     const { assert!(ShapeBoard::QUAD_ONLY); } // this evaluation function is designed for quad-only search
@@ -12,26 +28,11 @@ pub fn evaluate(node: &SearchNode<ShapeBoard>, i_left: usize) -> f64 {
     if node.meta & HOLD_MASK != 0 {
         score += config.weight_hold;
     }
-    fn get_well(board: ShapeBoard) -> usize {
-        if board.get_height(6) == 0 {
-            return 6;
-        }
-        if board.get_height(9) == 0 {
-            return 9;
-        }
-        if board.get_height(3) == 0 {
-            return 3;
-        }
-        let mut well = 0;
-        while well < 10 && board.get_height(well) != 0 {
-            well += 1;
-        }
-        well
-    }
     let well = get_well(node.state) as i8;
     let mut packed = node.state.packed_shape;
     let mut prev = (packed & ShapeBoard::COL_MASK) as i16;
     let mut max_h = prev;
+    let mut parity_diff = prev % 2;
     for i in 1..10i8 {
         packed >>= 5;
         let h = (packed & ShapeBoard::COL_MASK) as i16;
@@ -43,8 +44,10 @@ pub fn evaluate(node: &SearchNode<ShapeBoard>, i_left: usize) -> f64 {
             _ => config.weight_bump,
         };
         score += (h - prev).abs() as f64 * diff_weight;
+        parity_diff += if h % 2 == 1 { if i % 2 == 0 { 1 } else {-1} } else {0};
         prev = h;
     }
+    score += parity_diff as f64 * config.weight_parity;
     if max_h >= 18 {
         score += 3.0 * config.weight_height_warning + ((max_h - 17) * (max_h - 17)) as f64 * config.weight_height_danger;
     } else if max_h > 14 {
@@ -53,6 +56,12 @@ pub fn evaluate(node: &SearchNode<ShapeBoard>, i_left: usize) -> f64 {
     // 0.75=0.25*3, place a I in column 6 needs 3 ops, we want to cancel this penalty
     let lines_cleared = node.meta & LINES_CLEARED_MASK;
     score -= lines_cleared.min(TARGET_LINES - 4) as f64 * 0.75;
+    if node.meta & DAS_MASK == 1 << 9 {
+        score -= max_h.saturating_sub_unsigned(node.state.get_height(0) as u16) as f64 * config.weight_das_preserve;
+    }
+    if node.meta & DAS_MASK == 1 << 10 {
+        score -= max_h.saturating_sub_unsigned(node.state.get_height(9) as u16) as f64 * config.weight_das_preserve;
+    }
 
     if lines_cleared < TARGET_LINES - 4 {
         let normal_lines_left = TARGET_LINES - 4 - lines_cleared;

@@ -1,21 +1,26 @@
 use std::sync::{atomic::{AtomicU16, Ordering},Mutex};
 use arrayvec::ArrayVec;
-use rustc_hash::FxHashMap;
 use crate::{bitboard::{BitBoard, LINES_CLEARED_MASK, SearchNode}, config::ENDGAME_START};
 use crate::config::{ENDGAME_DEPTH, TARGET_LINES};
 use crate::movegen::{generate_moves, NoReplay};
 use crate::PieceType;
 
+#[derive(Clone, Copy)]
+struct TtEntry {
+    key: u64,
+    keys_pressed: u16,
+}
+const SHARD_CAPACITY: usize = 1 << 18;
 pub struct EndgameShared {
     best_keys: AtomicU16,
-    table: Vec<Mutex<FxHashMap<u64, u16>>>,
+    table: Vec<Mutex<Box<[TtEntry]>>>,
 }
 
 impl EndgameShared {
     pub fn new() -> Self {
         Self {
             best_keys: AtomicU16::new(u16::MAX),
-            table: (0..256).map(|_| Mutex::new(FxHashMap::default())).collect(),
+            table: (0..256).map(|_| Mutex::new(vec![TtEntry{ key: u64::MAX, keys_pressed: u16::MAX }; SHARD_CAPACITY].into_boxed_slice())).collect(),
             // 256 = 8 (piece pos) * 4 (das state) * 8 (hold piece)
         }
     }
@@ -45,13 +50,41 @@ impl EndgameShared {
 
     #[inline]
     fn visit(&self, piece_pos: usize, node: &SearchNode<BitBoard>) -> bool {
-        let mut table = self.table[Self::shard(piece_pos, node.meta)].lock().unwrap();
         let key = node.state.raw();
-        if table.get(&key).is_some_and(|&best| best <= node.keys_pressed) {
+        let hash = key.wrapping_mul(0x517cc1b727220a95);
+        
+        let idx1 = (hash as usize) & (SHARD_CAPACITY - 2); 
+        let idx2 = idx1 + 1; 
+
+        let shard_idx = Self::shard(piece_pos, node.meta);
+        let mut table = self.table[shard_idx].lock().unwrap();
+
+        if table[idx1].key == key {
             debug_assert!((node.meta & LINES_CLEARED_MASK) * 10 == ((piece_pos + ENDGAME_START) as u16 - (node.meta >> 11 != 0) as u16) * 4 - node.state.occupied_cells());
-            return false;
+            if table[idx1].keys_pressed <= node.keys_pressed {
+                return false;
+            }
+            table[idx1].keys_pressed = node.keys_pressed;
+            return true;
         }
-        table.insert(key, node.keys_pressed);
+
+        if table[idx2].key == key {
+            debug_assert!((node.meta & LINES_CLEARED_MASK) * 10 == ((piece_pos + ENDGAME_START) as u16 - (node.meta >> 11 != 0) as u16) * 4 - node.state.occupied_cells());
+            if table[idx2].keys_pressed <= node.keys_pressed {
+                return false;
+            }
+            table[idx2].keys_pressed = node.keys_pressed;
+            return true;
+        }
+
+        if table[idx1].keys_pressed > table[idx2].keys_pressed {
+            table[idx1].key = key;
+            table[idx1].keys_pressed = node.keys_pressed;
+        } else {
+            table[idx2].key = key;
+            table[idx2].keys_pressed = node.keys_pressed;
+        }
+        
         true
     }
 }
@@ -99,7 +132,8 @@ impl<'a> Dfs<'a> {
                 0
             } else {
                 // here we use saturating_sub since occupied cells may exceed remaining_lines * 10
-                (remaining_lines * 10).saturating_sub(node.state.occupied_cells()).div_ceil(4)
+                debug_assert!((remaining_lines * 10).saturating_sub(node.state.occupied_cells()) % 4 == 0);
+                (remaining_lines * 10).saturating_sub(node.state.occupied_cells()) / 4
             }
         };
         if min_pieces as usize > pieces_left {

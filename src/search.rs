@@ -2,11 +2,11 @@ use log::debug;
 use rustc_hash::FxHashMap;
 use rayon::prelude::*;
 use arrayvec::ArrayVec;
-use crate::config::{BEAM_WIDTH, ENDGAME_DEPTH, ENDGAME_START, TARGET_LINES, EVALUATE_DEPTH};
+use crate::config::{BEAM_WIDTH, DIVERSITY_BUCKET_SIZE, ENDGAME_DEPTH, ENDGAME_START, EVALUATE_DEPTH, TARGET_LINES};
 use crate::bitboard::{ShapeBoard, BitBoard, SearchNode, LINES_CLEARED_MASK};
 use crate::PieceType;
 use crate::movegen::{generate_moves, rebuild_actions_general, Actions, NoReplay};
-use crate::evaluator::evaluate;
+use crate::evaluator::{evaluate, get_well};
 use crate::endgame::{solve_pc, EndgameShared};
 
 #[derive(Clone, Copy)]
@@ -174,8 +174,28 @@ impl BeamSearch {
             let (scores, next_layer_nodes): (Vec<f64>, Vec<SearchNode<ShapeBoard>>) = map.into_values().unzip();
             let mut indiced_scores: Vec<(usize, f64)> = scores.into_iter().enumerate().collect();
             indiced_scores.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-            indiced_scores.truncate(BEAM_WIDTH);
-            layers[depth + 1] = indiced_scores.into_iter().map(|(i, _)| next_layer_nodes[i]).collect();
+            let mut bucket: FxHashMap<(usize, u64, i32), usize> = FxHashMap::default();
+            for (i, _) in indiced_scores.into_iter() {
+                let node = next_layer_nodes[i];
+                let well = get_well(node.state);
+                let mut packed = node.state.packed_shape;
+                let mut max_h = packed & ShapeBoard::COL_MASK;
+                let mut max_idx = 0;
+                for i in 1..10 {
+                    packed >>= 5;
+                    let h = packed & ShapeBoard::COL_MASK;
+                    if max_h < h {
+                        max_h = h;
+                        max_idx = i;
+                    }
+                }
+                if *bucket.entry((well, max_h, max_idx)).and_modify(|x| { *x += 1 }).or_insert(1) <= DIVERSITY_BUCKET_SIZE {
+                    layers[depth + 1].push(node);
+                    if layers[depth + 1].len() == BEAM_WIDTH {
+                        break;
+                    }
+                };
+            }
         }
         best_path
     }
