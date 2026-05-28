@@ -1,3 +1,7 @@
+[features]
+jstris = []
+default = []
+
 [package]
 name = "tetris_sprint_lkp"
 version = "0.1.0"

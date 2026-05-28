@@ -10,8 +10,12 @@ pub const ENDGAME_START: usize = MAX_PIECES - ENDGAME_DEPTH;
 
 pub enum GameEngine {
     TECHMINO,
+    #[cfg(feature = "jstris")]
     JSTRIS
 }
+#[cfg(feature = "jstris")]
+pub const ENGINE: GameEngine = GameEngine::JSTRIS;
+#[cfg(not(feature = "jstris"))]
 pub const ENGINE: GameEngine = GameEngine::TECHMINO;
 
 pub const EVALUATE_DEPTH: usize = 5;

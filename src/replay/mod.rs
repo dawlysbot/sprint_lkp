@@ -1,4 +1,5 @@
 pub mod techmino;
+#[cfg(feature = "jstris")]
 pub mod jstris;
 
 use crate::PieceType;
@@ -10,6 +11,7 @@ use crate::search::PathNode;
 pub fn gen_replay(seed: String, path: &[PathNode], piece_sequence: &[PieceType]) -> String {
     match ENGINE {
         GameEngine::TECHMINO => techmino::gen_replay(seed, path, piece_sequence, &ReplayConfig::default()),
+        #[cfg(feature = "jstris")]
         GameEngine::JSTRIS => jstris::gen_replay(seed, path, piece_sequence, &ReplayConfig::default()),
     }
 }
