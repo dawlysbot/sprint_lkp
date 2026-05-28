@@ -13,9 +13,9 @@ This project **does not use any code from Techmino**.
 All logic (piece spawning, replay encoding, etc.) was independently implemented by reading and understanding the game's publicly available behavior.  
 The solver then generates a replay file that represents the optimal solution in terms of the fewest key presses.
 
-- Written in **100% safe Rust**
+- Written in 100% Rust
 - No external game assets or proprietary code included
-- Output replay can be directly loaded into Techmino (0.27.x or later)
+- Output replay can be directly loaded into Techmino (0.17.14 or later)
 
 ## 🚀 Usage
 
@@ -28,8 +28,8 @@ The solver then generates a replay file that represents the optimal solution in 
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/sprint-lkp-solver.git
-cd sprint-lkp-solver
+git clone https://github.com/dawlysbot/sprint_lkp.git
+cd sprint_lkp
 
 # Run with a specific random seed
 cargo run --release -- 12345
