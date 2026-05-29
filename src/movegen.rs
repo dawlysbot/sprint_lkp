@@ -1,6 +1,6 @@
 use crate::PieceType;
 use crate::bitboard::{Board, SearchNode, HOLD_MASK, DAS_MASK, LINES_CLEARED_MASK, SHAPE_RANGES, FINESSE_TABLE};
-use crate::config::ALLOW_HOLD;
+use crate::config::NO_HOLD;
 use core::str;
 use std::collections::HashMap;
 use once_cell::sync::Lazy;
@@ -74,7 +74,7 @@ pub fn generate_moves<B: Board, S: ReplaySink>(moves: &mut ArrayVec<SearchNode<B
                 finesse_data >>= 3;
             }
         }
-        if !ALLOW_HOLD {
+        if NO_HOLD {
             break; // if hold is not allowed, we only generate moves for the original piece
         }
     }

@@ -87,12 +87,12 @@ impl ReplayConsumer for TechminoConsumer {
         self.das_start(dir);
         *self.operations.last_mut().unwrap() += 32;
     }
-    fn debug_keys_assertion(&self, i: usize, path: &[PathNode], piece: PieceType, active_das: Option<ActionKind>, reused: bool, hold: bool) {
+    fn debug_keys_assertion(&self, i: usize, path: &[PathNode], active_das: Option<ActionKind>, reused: bool) {
         if self.operations.len() + 2 * (active_das.is_some() as usize) != 4 * path[i].keys_pressed() as usize {
             debug!("Generated operations length {} does not match expected length {} before processing move {}",
                    self.operations.len(), 4 * path[i].keys_pressed() as usize, i);
             debug!("Generated operations: {:?}", self.operations.iter().map(|&x| -> i32 { if !(32..175).contains(&x) { x as i32 } else { -(x as i32 - 32) } }).collect::<Vec<_>>());
-            debug!("current piece: {}, reused: {}, hold: {}", piece as u8, reused, hold);
+            debug!("reused: {}", reused);
             match path[i] {
                 PathNode::Normal(node) => {
                     let heights = (0..10).map(|j| node.state.get_height(j)).collect::<Vec<_>>();

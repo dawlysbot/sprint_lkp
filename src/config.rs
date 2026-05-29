@@ -1,7 +1,7 @@
 pub const TARGET_LINES: u16 = 40;
-pub const ALLOW_HOLD: bool = true;
-pub const PC_END: bool = false;
-pub const MAX_PIECES: usize = TARGET_LINES as usize * 5 / 2 + (ALLOW_HOLD as usize) + (!PC_END as usize);
+pub const NO_HOLD: bool = cfg!(feature = "nohold");
+pub const PC_END: bool = cfg!(feature = "pcend");
+pub const MAX_PIECES: usize = TARGET_LINES as usize * 5 / 2 + (!NO_HOLD as usize) + (!PC_END as usize);
 
 pub const BEAM_WIDTH: usize = 10000;
 pub const DIVERSITY_BUCKET_SIZE: usize = 200;

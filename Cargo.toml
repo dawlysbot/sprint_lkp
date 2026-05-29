@@ -1,5 +1,7 @@
 [features]
 jstris = []
+nohold = []
+pcend = []
 default = []
 
 [package]
