@@ -5,7 +5,7 @@ use arrayvec::ArrayVec;
 use crate::config::{BEAM_WIDTH, DIVERSITY_BUCKET_SIZE, ENDGAME_DEPTH, ENDGAME_START, EVALUATE_DEPTH, TARGET_LINES};
 use crate::bitboard::{ShapeBoard, BitBoard, SearchNode, LINES_CLEARED_MASK};
 use crate::PieceType;
-use crate::movegen::{generate_moves, rebuild_actions_general, Actions, NoReplay};
+use crate::movegen::{generate_moves, compile_action, Action, NoReplay};
 use crate::evaluator::{evaluate, get_well};
 use crate::endgame::{solve_pc, EndgameShared};
 
@@ -62,10 +62,9 @@ impl BeamSearch {
         // If key_pressed is the same, we compare the number of non-reused DAS moves
         fn count_das_moves(piece_sequence: &[PieceType], path: &[PathNode]) -> u16 {
             let mut das_moves = 0;
-            for i in 0..path.len()-1 {
-                let piece = piece_sequence[i];
-                let (reused, _, _, actions) = rebuild_actions_general(&path[i], piece, &path[i + 1]);
-                if !reused && actions.iter().any(|&action| matches!(action, Actions::DasLeftUp | Actions::DasRightUp)) {
+            let steps = compile_action(path, piece_sequence);
+            for step in steps {
+                if !step.reused && step.actions.iter().any(|&action| matches!(action, Action::DasLeftUp | Action::DasRightUp)) {
                     das_moves += 1;
                 }
             }
@@ -108,7 +107,6 @@ impl BeamSearch {
         layers[0].push(SearchNode::<ShapeBoard>::initial());
 
         for depth in 0..max_depth {
-            debug!("Depth {}: layer size = {}", depth, layers[depth].len());
             if let Some(best) = best_path.last() {
                 endgame_shared.set_best(best.keys_pressed());
             }
@@ -175,8 +173,10 @@ impl BeamSearch {
             let mut indiced_scores: Vec<(usize, f64)> = scores.into_iter().enumerate().collect();
             indiced_scores.par_sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
             let mut bucket: FxHashMap<(usize, u64, i32), usize> = FxHashMap::default();
+            let mut minimum_keys = u16::MAX;
             for (i, _) in indiced_scores.into_iter() {
                 let node = next_layer_nodes[i];
+                minimum_keys = minimum_keys.min(node.keys_pressed);
                 let well = get_well(node.state);
                 let mut packed = node.state.packed_shape;
                 let mut max_h = packed & ShapeBoard::COL_MASK;
@@ -196,6 +196,7 @@ impl BeamSearch {
                     }
                 };
             }
+            debug!("Depth {}: layer size = {}, kpp = {}", depth + 1, layers[depth + 1].len(), minimum_keys as f64 / (depth + 1) as f64);
         }
         best_path
     }

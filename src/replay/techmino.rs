@@ -14,7 +14,7 @@ use log::debug;
 use crate::PieceType;
 use crate::config::{ReplayConfig, TARGET_LINES, TECHMINO_DAS_FRAME};
 use crate::search::PathNode;
-use crate::replay::{ReplayConsumer, ActionKind, compile_path};
+use crate::replay::{ReplayConsumer, ActionKind, compile_replay};
 use serde_json::{json, Value};
 
 /*
@@ -29,7 +29,7 @@ playerActions={ // key down
 }
 key up <- origin + 32
  */
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, std::hash::Hash)]
 #[repr(u32)]
 enum ReplayEvent {
     MoveLeft = 1,
@@ -44,19 +44,12 @@ struct TechminoConsumer {
     operations: Vec<u32>,
     tap_wait: u32,
     das_wait: u32,
+    das_frame: u32,
     timestamp: u32,
 }
-impl ReplayConsumer for TechminoConsumer {
-    fn from(das_frame: u32, replay_config: &ReplayConfig) -> Self {
-        let operations = Vec::new();
-        // operations format: (frame, event), (frame, event)...
-        let timestamp = replay_config.first_op;
-        let das_wait = (das_frame as f64 * replay_config.das_ratio) as u32;
-        let tap_wait = (das_frame as f64 * replay_config.short_ratio) as u32;
-        Self { operations, timestamp, tap_wait, das_wait }
-    }
-    fn tap(&mut self, action: ActionKind) {
-        let event = match action {
+impl TechminoConsumer {
+    fn mapping(action: ActionKind) -> ReplayEvent {
+        match action {
             ActionKind::MoveLeft => ReplayEvent::MoveLeft,
             ActionKind::MoveRight => ReplayEvent::MoveRight,
             ActionKind::RotateCW => ReplayEvent::RotateCW,
@@ -65,7 +58,22 @@ impl ReplayConsumer for TechminoConsumer {
             ActionKind::HardDrop => ReplayEvent::HardDrop,
             ActionKind::Hold => ReplayEvent::Hold,
             _ => unreachable!()
-        };
+        }
+    }
+}
+impl ReplayConsumer for TechminoConsumer {
+    fn from(das_frame: u32, replay_config: &ReplayConfig) -> Self {
+        let operations = Vec::new();
+        // operations format: (frame, event), (frame, event)...
+        let timestamp = replay_config.first_op;
+        let das_wait = (das_frame as f64 * replay_config.das_ratio) as u32;
+        let tap_wait = (das_frame as f64 * replay_config.short_ratio) as u32;
+        assert!(tap_wait < das_wait);
+        // the worst case belike: DL,DLU,CW,R
+        Self { operations, timestamp, tap_wait, das_wait, das_frame }
+    }
+    fn tap(&mut self, action: ActionKind) {
+        let event = TechminoConsumer::mapping(action);
         self.operations.push(self.timestamp);
         self.operations.push(event as u32);
         self.timestamp += self.tap_wait;
@@ -84,8 +92,47 @@ impl ReplayConsumer for TechminoConsumer {
         self.timestamp += self.das_wait;
     }
     fn das_release(&mut self, dir: ActionKind) {
-        self.das_start(dir);
-        *self.operations.last_mut().unwrap() += 32;
+        let event = match dir {
+            ActionKind::DasLeft => ReplayEvent::MoveLeft,
+            ActionKind::DasRight => ReplayEvent::MoveRight,
+            _ => unreachable!()
+        };
+        self.operations.push(self.timestamp);
+        self.operations.push(event as u32 + 32);
+        self.timestamp += self.tap_wait;
+    }
+    fn burst(&mut self, actions: Vec<ActionKind>) {
+        let events = actions.iter().map(|&action| TechminoConsumer::mapping(action)).collect::<Vec<_>>();
+        // burst: ev1_down --1f--> ev2_down --1f--> ev1_up --1f--> ev2_up
+        assert!({
+            let set: std::collections::HashSet<_> = events.iter().collect();
+            set.len() == events.len()
+        });
+        assert!(events.len() as u32 + self.tap_wait < self.das_frame);
+        for &event in events.iter() {
+            self.operations.push(self.timestamp);
+            self.operations.push(event as u32);
+            self.timestamp += 1;
+            self.operations.push(self.timestamp);
+            self.operations.push(event as u32 + 32);
+        }
+        if !events.is_empty() {
+            self.timestamp += self.tap_wait;
+        }
+        self.tap(ActionKind::HardDrop);
+        self.timestamp += self.das_frame.saturating_sub(self.tap_wait * 3 + events.len() as u32 * 2);
+    }
+    fn pipeline(&mut self, dir: ActionKind) {
+        let event = match dir {
+            ActionKind::DasLeft => ReplayEvent::MoveLeft,
+            ActionKind::DasRight => ReplayEvent::MoveRight,
+            _ => unreachable!()
+        };
+        self.operations.push(self.timestamp);
+        self.operations.push(event as u32);
+        self.timestamp += self.tap_wait;
+        self.tap(ActionKind::HardDrop);
+        self.timestamp += self.das_wait.saturating_sub(self.tap_wait * 3);
     }
     fn debug_keys_assertion(&self, i: usize, path: &[PathNode], active_das: Option<ActionKind>, reused: bool) {
         if self.operations.len() + 2 * (active_das.is_some() as usize) != 4 * path[i].keys_pressed() as usize {
@@ -110,7 +157,7 @@ impl ReplayConsumer for TechminoConsumer {
 
 fn export_replay(path: &[PathNode], piece_sequence: &[PieceType], replay_config: &ReplayConfig) -> Vec<u8> {
     let mut consumer = <TechminoConsumer as ReplayConsumer>::from(TECHMINO_DAS_FRAME, replay_config);
-    compile_path(path, piece_sequence, &mut consumer);
+    compile_replay(path, piece_sequence, &mut consumer);
     debug_assert!(consumer.operations.len() == path.last().unwrap().keys_pressed() as usize * 4, "Operations length must be four times the number of keys pressed");
     let path_data = &consumer.operations;
     debug_assert!(consumer.operations.len() == path.last().unwrap().keys_pressed() as usize * 4, "Operations length must be four times the number of keys pressed");

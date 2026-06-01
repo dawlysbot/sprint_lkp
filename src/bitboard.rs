@@ -54,17 +54,18 @@ impl FastMask {
     fn added_mask(self) -> u32 { self.0 >> 12 }
 }
 
-const fn encode_finesse_data(operations: [u8; 10], reuse: u32) -> u32 {
+const fn encode_finesse_data(operations: [u8; 10], reuse: u64, provide_l: u64, provide_r: u64, special: u64) -> u64 {
     // 3 bits per target column, 30bits in total
     let mut rightmost = 9;
     while rightmost > 0 && operations[rightmost] == 0 {
         rightmost -= 1;
     }
-    let mut mask = 0u32;
+    let mut mask = 0u64;
     let mut i = rightmost;
+    let merged = reuse | provide_l << 1 | provide_r << 2 | special << 3;
     loop {
         debug_assert!(operations[i] <= 0b11, "Operation value must be between 0 and 3");
-        mask = mask << 3 | (operations[i] as u32) | (reuse >> (rightmost - i) as u32 & 1u32) << 2;
+        mask = mask << 6 | operations[i] as u64 | ((merged >> ((rightmost - i) * 4) & 0xF_u64) << 2) as u64;
         if i == 0 {
             break;
         }
@@ -72,9 +73,9 @@ const fn encode_finesse_data(operations: [u8; 10], reuse: u32) -> u32 {
     }
     mask
 }
-const fn raw_pack(width: u8, bottom: [u8; 4], max_height: u8, added_mask: u32, operations: [u8; 10], reuse: u32) -> (u32, u32) {
+const fn raw_pack(width: u8, bottom: [u8; 4], max_height: u8, added_mask: u32, operations: [u8; 10], reuse: u64, provide_l: u64, provide_r: u64, special: u64) -> (u32, u64) {
     // added_mask given is like 0x121, we will parse it from 2**4 to 2**6, so it must be less than 2**19
-    let finesse_data = encode_finesse_data(operations, reuse);
+    let finesse_data = encode_finesse_data(operations, reuse, provide_l, provide_r, special);
     let parsed_added_mask = {
         let mut mask = 0;
         let mut i = 0;
@@ -86,6 +87,7 @@ const fn raw_pack(width: u8, bottom: [u8; 4], max_height: u8, added_mask: u32, o
             i += 1;
         }
         assert!(cells == 4, "added_mask must have exactly 4 cells");
+        assert!(mask < 1 << 19, "added_mask must be smaller than 2**19");
         mask
     };
     let packed = ((width - 1) as u32)
@@ -95,38 +97,38 @@ const fn raw_pack(width: u8, bottom: [u8; 4], max_height: u8, added_mask: u32, o
         | (bottom[3] as u32) << 8
         | ((max_height - 1) as u32) << 10
         | parsed_added_mask << 12;
-    (packed, finesse_data | ((width - 1) as u32) << 30)
+    (packed, finesse_data | (width as u64) << 60)
 }
 pub const SHAPE_RANGES: [usize; 8] = [
     0,2,4,8,12,16,17,19
 ];
-pub const RAW_DATA: [(u32, u32); 19] = [
+pub const RAW_DATA: [(u32, u64); 19] = [
     // Z
-    raw_pack(3, [1, 0, 0, 0], 2, 0x121, [1, 2, 1, 0, 1, 2, 2, 1, 0, 0], 0b11000011),
-    raw_pack(2, [0, 1, 0, 0], 3, 0x22, [2, 2, 2, 1, 1, 2, 3, 2, 2, 0], 0b110000111),
+    raw_pack(3, [1, 0, 0, 0], 2, 0x121, [1, 2, 1, 0, 1, 2, 2, 1, 0, 0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
+    raw_pack(2, [0, 1, 0, 0], 3, 0x22, [2, 2, 2, 1, 1, 2, 3, 2, 2, 0], 0x110000111, 0x101000100, 0x000001101, 0x001000000),
     // S
-    raw_pack(3, [0, 0, 1, 0], 2, 0x121, [1, 2, 1, 0, 1, 2, 2, 1, 0, 0], 0b11000011),
-    raw_pack(2, [1, 0, 0, 0], 3, 0x22, [2, 2, 2, 1, 1, 2, 3, 2, 2, 0], 0b110000111),
+    raw_pack(3, [0, 0, 1, 0], 2, 0x121, [1, 2, 1, 0, 1, 2, 2, 1, 0, 0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
+    raw_pack(2, [1, 0, 0, 0], 3, 0x22, [2, 2, 2, 1, 1, 2, 3, 2, 2, 0], 0x110000111, 0x101000100, 0x000001101, 0x001000000),
     // J
-    raw_pack(3, [0, 0, 0, 0], 2, 0x211, [1, 2, 1, 0, 1, 2, 2, 1, 0, 0], 0b11000011),
-    raw_pack(2, [0, 2, 0, 0], 3, 0x31, [2, 2, 3, 2, 1, 2, 3, 3, 2, 0], 0b111000011),
-    raw_pack(3, [1, 1, 0, 0], 2, 0x112, [2, 3, 2, 1, 2, 3, 3, 2, 0, 0], 0b11000011),
-    raw_pack(2, [0, 0, 0, 0], 3, 0x13, [2, 3, 2, 1, 2, 3, 3, 2, 2, 0], 0b110000111),
+    raw_pack(3, [0, 0, 0, 0], 2, 0x211, [1, 2, 1, 0, 1, 2, 2, 1, 0, 0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
+    raw_pack(2, [0, 2, 0, 0], 3, 0x31, [2, 2, 3, 2, 1, 2, 3, 3, 2, 0], 0x111000011, 0x101100010, 0x001001111, 0x000000100),
+    raw_pack(3, [1, 1, 0, 0], 2, 0x112, [2, 3, 2, 1, 2, 3, 3, 2, 0, 0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
+    raw_pack(2, [0, 0, 0, 0], 3, 0x13, [2, 3, 2, 1, 2, 3, 3, 2, 2, 0], 0x110000111, 0x111000100, 0x010011101, 0x000000100),
     // L
-    raw_pack(3, [0, 0, 0, 0], 2, 0x112, [1, 2, 1, 0, 1, 2, 2, 1, 0, 0], 0b11000011),
-    raw_pack(2, [0, 0, 0, 0], 3, 0x31, [2, 2, 3, 2, 1, 2, 3, 3, 2, 0], 0b111000011),
-    raw_pack(3, [0, 1, 1, 0], 2, 0x211, [2, 3, 2, 1, 2, 3, 3, 2, 0, 0], 0b11000011),
-    raw_pack(2, [2, 0, 0, 0], 3, 0x13, [2, 3, 2, 1, 2, 3, 3, 2, 2, 0], 0b110000111),
+    raw_pack(3, [0, 0, 0, 0], 2, 0x112, [1, 2, 1, 0, 1, 2, 2, 1, 0, 0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
+    raw_pack(2, [0, 0, 0, 0], 3, 0x31, [2, 2, 3, 2, 1, 2, 3, 3, 2, 0], 0x111000011, 0x101100010, 0x001001111, 0x000000100),
+    raw_pack(3, [0, 1, 1, 0], 2, 0x211, [2, 3, 2, 1, 2, 3, 3, 2, 0, 0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
+    raw_pack(2, [2, 0, 0, 0], 3, 0x13, [2, 3, 2, 1, 2, 3, 3, 2, 2, 0], 0x110000111, 0x111000100, 0x010011101, 0x000000100),
     // T
-    raw_pack(3, [0, 0, 0, 0], 2, 0x121, [1, 2, 1, 0, 1, 2, 2, 1, 0, 0], 0b11000011),
-    raw_pack(2, [0, 1, 0, 0], 3, 0x31, [2, 2, 3, 2, 1, 2, 3, 3, 2, 0], 0b111000011),
-    raw_pack(3, [1, 0, 1, 0], 2, 0x121, [2, 3, 2, 1, 2, 3, 3, 2, 0, 0], 0b11000011),
-    raw_pack(2, [1, 0, 0, 0], 3, 0x13, [2, 3, 2, 1, 2, 3, 3, 2, 2, 0], 0b110000111),
+    raw_pack(3, [0, 0, 0, 0], 2, 0x121, [1, 2, 1, 0, 1, 2, 2, 1, 0, 0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
+    raw_pack(2, [0, 1, 0, 0], 3, 0x31, [2, 2, 3, 2, 1, 2, 3, 3, 2, 0], 0x111000011, 0x101100010, 0x001001111, 0x000000100),
+    raw_pack(3, [1, 0, 1, 0], 2, 0x121, [2, 3, 2, 1, 2, 3, 3, 2, 0, 0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
+    raw_pack(2, [1, 0, 0, 0], 3, 0x13, [2, 3, 2, 1, 2, 3, 3, 2, 2, 0], 0x110000111, 0x111000100, 0x010011101, 0x000000100),
     // O
-    raw_pack(2, [0, 0, 0, 0], 2, 0x22, [1, 2, 2, 1, 0, 1, 2, 2, 1, 0], 0b110000011),
+    raw_pack(2, [0, 0, 0, 0], 2, 0x22, [1, 2, 2, 1, 0, 1, 2, 2, 1, 0], 0x110000011, 0x101100010, 0x010001101, 0x001000100),
     // I
-    raw_pack(4, [0, 0, 0, 0], 1, 0x1111, [1, 2, 1, 0, 1, 2, 1, 0, 0, 0], 0b1100011),
-    raw_pack(1, [0, 0, 0, 0], 4, 0x4, [2, 2, 2, 2, 1, 1, 2, 2, 2, 2], 0b1110000111),
+    raw_pack(4, [0, 0, 0, 0], 1, 0x1111, [1, 2, 1, 0, 1, 2, 1, 0, 0, 0], 0x1100011, 0x1110010, 0x0100111, 0x0000000),
+    raw_pack(1, [0, 0, 0, 0], 4, 0x4, [2, 2, 2, 2, 1, 1, 2, 2, 2, 2], 0x1110000111, 0x1001000000, 0x0000001001, 0x0001001000),
 ];
 const fn shape_to_bit(arr: &[FastMask; 19]) -> [u32; 19] {
     let mut bit_arr = [0u32; 19];
@@ -152,8 +154,8 @@ const fn shape_to_bit(arr: &[FastMask; 19]) -> [u32; 19] {
     }
     bit_arr
 }
-pub const FINESSE_TABLE: [u32; 19] = {
-    let mut table = [0u32; 19];
+pub const FINESSE_TABLE: [u64; 19] = {
+    let mut table = [0u64; 19];
     let mut i = 0;
     while i < RAW_DATA.len() {
         table[i] = RAW_DATA[i].1;

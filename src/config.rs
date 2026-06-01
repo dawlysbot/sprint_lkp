@@ -7,6 +7,7 @@ pub const BEAM_WIDTH: usize = 10000;
 pub const DIVERSITY_BUCKET_SIZE: usize = 200;
 pub const ENDGAME_DEPTH: usize = 7;
 pub const ENDGAME_START: usize = MAX_PIECES - ENDGAME_DEPTH;
+pub const EVALUATE_DEPTH: usize = 5;
 
 pub enum GameEngine {
     TECHMINO,
@@ -18,7 +19,6 @@ pub const ENGINE: GameEngine = GameEngine::JSTRIS;
 #[cfg(not(feature = "jstris"))]
 pub const ENGINE: GameEngine = GameEngine::TECHMINO;
 
-pub const EVALUATE_DEPTH: usize = 5;
 pub struct EvaluateConfig {
     pub weight_hold: f64,
     pub weight_i_tight: f64,
