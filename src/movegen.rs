@@ -62,7 +62,7 @@ pub fn generate_moves<B: Board, S: ReplaySink>(moves: &mut ArrayVec<SearchNode<B
                     // node.meta's bit 9-10 represent the das state, x>4 means right side
                     debug_assert!(((meta_nodas & LINES_CLEARED_MASK) + new_state.1 as u16) < (1 << 9), "Lines cleared should be less than 512");
                     let meta_das = if cfg!(feature = "advanced_das") {
-                        ((finesse_data & 0x18) as u16) << 6 | (special as u16) << (9 + !(x > 4) as u8)
+                        ((finesse_data & 0x18) as u16) << 6 | (special as u16) << (9 + (x <= 4) as u8)
                     } else { (((x == 0) as u16) << 9) | ((x == 10 - width) as u16) << 10 };
                     // finesse_data's bit 3-4 represent the provided DAS state, and 9-3=6 is the offset
                     moves.push(SearchNode {
@@ -164,7 +164,7 @@ pub fn compile_action(path: &[PathNode], piece_sequence: &[PieceType]) -> Vec<Ac
                 if seq.first() == Some(&dir) {
                     let mut seq = seq;
                     let pos = seq.iter().position(|x| matches!(x, Action::DasLeftUp | Action::DasRightUp)).unwrap();
-                    if !seq.get(pos + 1).map_or(true, |a| matches!(a, Action::MoveLeft | Action::MoveRight)) {
+                    if !seq.get(pos + 1).is_none_or(|a| matches!(a, Action::MoveLeft | Action::MoveRight)) {
                         assert!(matches!(seq.last().unwrap(), Action::MoveLeft | Action::MoveRight));
                         let last_move = seq.pop().unwrap();
                         seq.insert(pos + 1, last_move);

@@ -54,81 +54,64 @@ impl FastMask {
     fn added_mask(self) -> u32 { self.0 >> 12 }
 }
 
-const fn encode_finesse_data(operations: [u8; 10], reuse: u64, provide_l: u64, provide_r: u64, special: u64) -> u64 {
-    // 3 bits per target column, 30bits in total
-    let mut rightmost = 9;
-    while rightmost > 0 && operations[rightmost] == 0 {
-        rightmost -= 1;
-    }
-    let mut mask = 0u64;
-    let mut i = rightmost;
-    let merged = reuse | provide_l << 1 | provide_r << 2 | special << 3;
-    loop {
-        debug_assert!(operations[i] <= 0b11, "Operation value must be between 0 and 3");
-        mask = mask << 6 | operations[i] as u64 | ((merged >> ((rightmost - i) * 4) & 0xF_u64) << 2) as u64;
-        if i == 0 {
-            break;
-        }
-        i -= 1;
-    }
-    mask
-}
-const fn raw_pack(width: u8, bottom: [u8; 4], max_height: u8, added_mask: u32, operations: [u8; 10], reuse: u64, provide_l: u64, provide_r: u64, special: u64) -> (u32, u64) {
-    // added_mask given is like 0x121, we will parse it from 2**4 to 2**6, so it must be less than 2**19
-    let finesse_data = encode_finesse_data(operations, reuse, provide_l, provide_r, special);
-    let parsed_added_mask = {
-        let mut mask = 0;
-        let mut i = 0;
-        let mut cells = 0;
-        while i < width {
-            let col_mask = (added_mask >> (4 * (width - 1 - i))) & 0xF;
-            mask |= col_mask << (5 * i);
-            cells += col_mask;
-            i += 1;
-        }
-        assert!(cells == 4, "added_mask must have exactly 4 cells");
-        assert!(mask < 1 << 19, "added_mask must be smaller than 2**19");
-        mask
-    };
-    let packed = ((width - 1) as u32)
-        | (bottom[0] as u32) << 2
-        | (bottom[1] as u32) << 4
-        | (bottom[2] as u32) << 6
-        | (bottom[3] as u32) << 8
-        | ((max_height - 1) as u32) << 10
-        | parsed_added_mask << 12;
-    (packed, finesse_data | (width as u64) << 60)
-}
 pub const SHAPE_RANGES: [usize; 8] = [
     0,2,4,8,12,16,17,19
 ];
-pub const RAW_DATA: [(u32, u64); 19] = [
+const SHAPE_PARAMS: [(u8, [u8; 4], u8, u32); 19] = [
     // Z
-    raw_pack(3, [1, 0, 0, 0], 2, 0x121, [1, 2, 1, 0, 1, 2, 2, 1, 0, 0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
-    raw_pack(2, [0, 1, 0, 0], 3, 0x22, [2, 2, 2, 1, 1, 2, 3, 2, 2, 0], 0x110000111, 0x101000100, 0x000001101, 0x001000000),
+    (3, [1,0,0,0], 2, 0x121),
+    (2, [0,1,0,0], 3, 0x22),
     // S
-    raw_pack(3, [0, 0, 1, 0], 2, 0x121, [1, 2, 1, 0, 1, 2, 2, 1, 0, 0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
-    raw_pack(2, [1, 0, 0, 0], 3, 0x22, [2, 2, 2, 1, 1, 2, 3, 2, 2, 0], 0x110000111, 0x101000100, 0x000001101, 0x001000000),
+    (3, [0,0,1,0], 2, 0x121),
+    (2, [1,0,0,0], 3, 0x22),
     // J
-    raw_pack(3, [0, 0, 0, 0], 2, 0x211, [1, 2, 1, 0, 1, 2, 2, 1, 0, 0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
-    raw_pack(2, [0, 2, 0, 0], 3, 0x31, [2, 2, 3, 2, 1, 2, 3, 3, 2, 0], 0x111000011, 0x101100010, 0x001001111, 0x000000100),
-    raw_pack(3, [1, 1, 0, 0], 2, 0x112, [2, 3, 2, 1, 2, 3, 3, 2, 0, 0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
-    raw_pack(2, [0, 0, 0, 0], 3, 0x13, [2, 3, 2, 1, 2, 3, 3, 2, 2, 0], 0x110000111, 0x111000100, 0x010011101, 0x000000100),
+    (3, [0,0,0,0], 2, 0x211),
+    (2, [0,2,0,0], 3, 0x31),
+    (3, [1,1,0,0], 2, 0x112),
+    (2, [0,0,0,0], 3, 0x13),
     // L
-    raw_pack(3, [0, 0, 0, 0], 2, 0x112, [1, 2, 1, 0, 1, 2, 2, 1, 0, 0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
-    raw_pack(2, [0, 0, 0, 0], 3, 0x31, [2, 2, 3, 2, 1, 2, 3, 3, 2, 0], 0x111000011, 0x101100010, 0x001001111, 0x000000100),
-    raw_pack(3, [0, 1, 1, 0], 2, 0x211, [2, 3, 2, 1, 2, 3, 3, 2, 0, 0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
-    raw_pack(2, [2, 0, 0, 0], 3, 0x13, [2, 3, 2, 1, 2, 3, 3, 2, 2, 0], 0x110000111, 0x111000100, 0x010011101, 0x000000100),
+    (3, [0,0,0,0], 2, 0x112),
+    (2, [0,0,0,0], 3, 0x31),
+    (3, [0,1,1,0], 2, 0x211),
+    (2, [2,0,0,0], 3, 0x13),
     // T
-    raw_pack(3, [0, 0, 0, 0], 2, 0x121, [1, 2, 1, 0, 1, 2, 2, 1, 0, 0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
-    raw_pack(2, [0, 1, 0, 0], 3, 0x31, [2, 2, 3, 2, 1, 2, 3, 3, 2, 0], 0x111000011, 0x101100010, 0x001001111, 0x000000100),
-    raw_pack(3, [1, 0, 1, 0], 2, 0x121, [2, 3, 2, 1, 2, 3, 3, 2, 0, 0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
-    raw_pack(2, [1, 0, 0, 0], 3, 0x13, [2, 3, 2, 1, 2, 3, 3, 2, 2, 0], 0x110000111, 0x111000100, 0x010011101, 0x000000100),
+    (3, [0,0,0,0], 2, 0x121),
+    (2, [0,1,0,0], 3, 0x31),
+    (3, [1,0,1,0], 2, 0x121),
+    (2, [1,0,0,0], 3, 0x13),
     // O
-    raw_pack(2, [0, 0, 0, 0], 2, 0x22, [1, 2, 2, 1, 0, 1, 2, 2, 1, 0], 0x110000011, 0x101100010, 0x010001101, 0x001000100),
+    (2, [0,0,0,0], 2, 0x22),
     // I
-    raw_pack(4, [0, 0, 0, 0], 1, 0x1111, [1, 2, 1, 0, 1, 2, 1, 0, 0, 0], 0x1100011, 0x1110010, 0x0100111, 0x0000000),
-    raw_pack(1, [0, 0, 0, 0], 4, 0x4, [2, 2, 2, 2, 1, 1, 2, 2, 2, 2], 0x1110000111, 0x1001000000, 0x0000001001, 0x0001001000),
+    (4, [0,0,0,0], 1, 0x1111),
+    (1, [0,0,0,0], 4, 0x4),
+];
+const FINESSE_PARAMS: [(u8, [u8; 10], u64, u64, u64, u64); 19] = [
+    // Z
+    (3, [1,2,1,0,1,2,2,1,0,0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
+    (2, [2,2,2,1,1,2,3,2,2,0], 0x110000111, 0x101000100, 0x000001101, 0x001000000),
+    // S
+    (3, [1,2,1,0,1,2,2,1,0,0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
+    (2, [2,2,2,1,1,2,3,2,2,0], 0x110000111, 0x101000100, 0x000001101, 0x001000000),
+    // J
+    (3, [1,2,1,0,1,2,2,1,0,0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
+    (2, [2,2,3,2,1,2,3,3,2,0], 0x111000011, 0x101100010, 0x001001111, 0x000000100),
+    (3, [2,3,2,1,2,3,3,2,0,0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
+    (2, [2,3,2,1,2,3,3,2,2,0], 0x110000111, 0x111000100, 0x010011101, 0x000000100),
+    // L
+    (3, [1,2,1,0,1,2,2,1,0,0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
+    (2, [2,2,3,2,1,2,3,3,2,0], 0x111000011, 0x101100010, 0x001001111, 0x000000100),
+    (3, [2,3,2,1,2,3,3,2,0,0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
+    (2, [2,3,2,1,2,3,3,2,2,0], 0x110000111, 0x111000100, 0x010011101, 0x000000100),
+    // T
+    (3, [1,2,1,0,1,2,2,1,0,0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
+    (2, [2,2,3,2,1,2,3,3,2,0], 0x111000011, 0x101100010, 0x001001111, 0x000000100),
+    (3, [2,3,2,1,2,3,3,2,0,0], 0x11000011, 0x11100010, 0x01001111, 0x00000100),
+    (2, [2,3,2,1,2,3,3,2,2,0], 0x110000111, 0x111000100, 0x010011101, 0x000000100),
+    // O
+    (2, [1,2,2,1,0,1,2,2,1,0], 0x110000011, 0x101100010, 0x010001101, 0x001000100),
+    // I
+    (4, [1,2,1,0,1,2,1,0,0,0], 0x1100011, 0x1110010, 0x0100111, 0x0000000),
+    (1, [2,2,2,2,1,1,2,2,2,2], 0x1110000111, 0x1001000000, 0x0000001001, 0x0001001000),
 ];
 const fn shape_to_bit(arr: &[FastMask; 19]) -> [u32; 19] {
     let mut bit_arr = [0u32; 19];
@@ -157,8 +140,25 @@ const fn shape_to_bit(arr: &[FastMask; 19]) -> [u32; 19] {
 pub const FINESSE_TABLE: [u64; 19] = {
     let mut table = [0u64; 19];
     let mut i = 0;
-    while i < RAW_DATA.len() {
-        table[i] = RAW_DATA[i].1;
+    while i < FINESSE_PARAMS.len() {
+        let (width, ops, reuse, provide_l, provide_r, special) = FINESSE_PARAMS[i];
+        // 3 bits per target column, 30bits in total
+        let mut rightmost = 9;
+        while rightmost > 0 && ops[rightmost] == 0 {
+            rightmost -= 1;
+        }
+        let mut mask = 0u64;
+        let mut j: usize = rightmost;
+        let merged = reuse | provide_l << 1 | provide_r << 2 | special << 3;
+        loop {
+            debug_assert!(ops[j] <= 0b11, "Operation value must be between 0 and 3");
+            mask = mask << 6 | ops[j] as u64 | ((merged >> ((rightmost - j) * 4) & 0xF_u64) << 2);
+            if j == 0 {
+                break;
+            }
+            j -= 1;
+        }
+        table[i] = mask | (width as u64) << 60;
         i += 1;
     }
     table
@@ -166,8 +166,30 @@ pub const FINESSE_TABLE: [u64; 19] = {
 const SHAPE_TABLE: [FastMask; 19] = {
     let mut table = [FastMask(0); 19];
     let mut i = 0;
-    while i < RAW_DATA.len() {
-        table[i] = FastMask(RAW_DATA[i].0);
+    while i < SHAPE_PARAMS.len() {
+        let (width, bottom, max_height, added_mask) = SHAPE_PARAMS[i];
+        let parsed_added_mask = {
+            let mut mask = 0;
+            let mut i = 0;
+            let mut cells = 0;
+            while i < width {
+                let col_mask = (added_mask >> (4 * (width - 1 - i))) & 0xF;
+                mask |= col_mask << (5 * i);
+                cells += col_mask;
+                i += 1;
+            }
+            assert!(cells == 4, "added_mask must have exactly 4 cells");
+            assert!(mask < 1 << 19, "added_mask must be smaller than 2**19");
+            mask
+        };
+        let packed = ((width - 1) as u32)
+            | (bottom[0] as u32) << 2
+            | (bottom[1] as u32) << 4
+            | (bottom[2] as u32) << 6
+            | (bottom[3] as u32) << 8
+            | ((max_height - 1) as u32) << 10
+            | parsed_added_mask << 12;
+        table[i] = FastMask(packed);
         i += 1;
     }
     table

@@ -1,4 +1,8 @@
 [features]
+hotpath = ["hotpath/hotpath"]
+hotpath-cpu = ["hotpath/hotpath-cpu"]
+hotpath-alloc = ["hotpath/hotpath-alloc"]
+
 jstris = []
 nohold = []
 pcend = []
@@ -23,3 +27,4 @@ log = "0.4.29"
 env_logger = "0.11.10"
 flate2 = "1.1.9"
 lz-str = "0.2.1"
+hotpath = "0.16.1"

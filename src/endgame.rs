@@ -132,7 +132,7 @@ impl<'a> Dfs<'a> {
                 0
             } else {
                 // here we use saturating_sub since occupied cells may exceed remaining_lines * 10
-                debug_assert!((remaining_lines * 10).saturating_sub(node.state.occupied_cells()) % 4 == 0);
+                debug_assert!((remaining_lines * 10).saturating_sub(node.state.occupied_cells()).is_multiple_of(4));
                 (remaining_lines * 10).saturating_sub(node.state.occupied_cells()) / 4
             }
         };
@@ -168,6 +168,7 @@ impl<'a> Dfs<'a> {
     }
 }
 
+#[hotpath::measure]
 pub fn solve_pc(
     board: SearchNode<BitBoard>,
     pieces: &[PieceType],

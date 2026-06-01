@@ -10,7 +10,7 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use std::io::Write;
 use base64::Engine;
-use log::debug;
+use log::error;
 use crate::PieceType;
 use crate::config::{ReplayConfig, TARGET_LINES, TECHMINO_DAS_FRAME};
 use crate::search::PathNode;
@@ -136,18 +136,18 @@ impl ReplayConsumer for TechminoConsumer {
     }
     fn debug_keys_assertion(&self, i: usize, path: &[PathNode], active_das: Option<ActionKind>, reused: bool) {
         if self.operations.len() + 2 * (active_das.is_some() as usize) != 4 * path[i].keys_pressed() as usize {
-            debug!("Generated operations length {} does not match expected length {} before processing move {}",
+            error!("Generated operations length {} does not match expected length {} before processing move {}",
                    self.operations.len(), 4 * path[i].keys_pressed() as usize, i);
-            debug!("Generated operations: {:?}", self.operations.iter().map(|&x| -> i32 { if !(32..175).contains(&x) { x as i32 } else { -(x as i32 - 32) } }).collect::<Vec<_>>());
-            debug!("reused: {}", reused);
+            error!("Generated operations: {:?}", self.operations.iter().map(|&x| -> i32 { if !(32..175).contains(&x) { x as i32 } else { -(x as i32 - 32) } }).collect::<Vec<_>>());
+            error!("reused: {}", reused);
             match path[i] {
                 PathNode::Normal(node) => {
                     let heights = (0..10).map(|j| node.state.get_height(j)).collect::<Vec<_>>();
-                    debug!("Node meta: {:016b}, keys_pressed: {}, board: {:016x}, heights: {:?}", node.meta, node.keys_pressed, node.state.packed_shape, heights);
+                    error!("Node meta: {:016b}, keys_pressed: {}, board: {:016x}, heights: {:?}", node.meta, node.keys_pressed, node.state.packed_shape, heights);
                 }
                 PathNode::Pc(node) => {
                     let heights = (0..10).map(|j| node.state.get_column(j)).collect::<Vec<_>>();
-                    debug!("PC Node meta: {:016b}, keys_pressed: {}, board: {:016x}, heights: {:?}", node.meta, node.keys_pressed, node.state.raw(), heights);
+                    error!("PC Node meta: {:016b}, keys_pressed: {}, board: {:016x}, heights: {:?}", node.meta, node.keys_pressed, node.state.raw(), heights);
                 }
             }
             panic!();
@@ -184,7 +184,7 @@ fn export_replay(path: &[PathNode], piece_sequence: &[PieceType], replay_config:
 pub fn gen_replay(seed: String, path: &[PathNode], piece_sequence: &[PieceType], replay_config: &ReplayConfig) -> String {
     let metadata = default_config(seed);
     let metadata_bin = serde_json::to_vec(&metadata).expect("Failed to serialize metadata");
-    let replay_bin = export_replay(path, piece_sequence, &replay_config);
+    let replay_bin = export_replay(path, piece_sequence, replay_config);
     
     let final_data = metadata_bin.into_iter().chain(b"\n".iter().copied()).chain(replay_bin).collect::<Vec<u8>>();
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());

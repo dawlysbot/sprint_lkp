@@ -6,7 +6,7 @@ use rand::Rng;
 use crate::{PieceType, config::{ENGINE, GameEngine}};
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 
-pub fn generate_piece_sequence(seed: &String, count: usize) -> Vec<PieceType> {
+pub fn generate_piece_sequence(seed: &str, count: usize) -> Vec<PieceType> {
     match ENGINE {
         GameEngine::TECHMINO => techmino::generate_piece_sequence(seed, count),
         #[cfg(feature = "jstris")]

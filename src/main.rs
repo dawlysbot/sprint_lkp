@@ -6,6 +6,7 @@ use tetris_sprint_lkp::{
 use tetris_sprint_lkp::bagrng::{generate_piece_sequence, generate_seed};
 use tetris_sprint_lkp::replay::gen_replay;
 
+#[hotpath::main]
 fn main() {
     env_logger::init();
     let args: Vec<String> = env::args().collect();

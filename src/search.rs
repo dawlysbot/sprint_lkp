@@ -1,4 +1,4 @@
-use log::debug;
+use log::info;
 use rustc_hash::FxHashMap;
 use rayon::prelude::*;
 use arrayvec::ArrayVec;
@@ -94,6 +94,7 @@ impl BeamSearch {
         }
         None
     }
+    #[hotpath::measure]
     pub fn run(piece_sequence: &[PieceType]) -> Vec<PathNode> {
     // result format: null state (board=0) at index 0, step i: takes piece_sequence[i], then go to step i+1, so |result| = |piece_sequence| + 1
         let i_left_suffix: Vec<usize> = piece_sequence.iter().rev().scan(0, |sum, &piece| { *sum += (piece == PieceType::I) as usize; Some(*sum) }).collect::<Vec<_>>().into_iter().rev().chain([0]).collect();
@@ -129,7 +130,7 @@ impl BeamSearch {
                                 pc_sequence: solution,
                             };
                             if local_replay.is_empty() || final_keys < local_replay[0].keys_pressed {
-                                debug!("Found new best path with {} keys pressed at depth {}, idx {}, updating replay", final_keys, depth, idx);
+                                info!("Found new best path with {} keys pressed at depth {}, idx {}, updating replay", final_keys, depth, idx);
                                 local_replay.clear();
                                 local_replay.push(path);
                             } else if final_keys == local_replay[0].keys_pressed {
@@ -196,11 +197,12 @@ impl BeamSearch {
                     }
                 };
             }
-            debug!("Depth {}: layer size = {}, kpp = {}", depth + 1, layers[depth + 1].len(), minimum_keys as f64 / (depth + 1) as f64);
+            info!("Depth {}: layer size = {}, kpp = {}", depth + 1, layers[depth + 1].len(), minimum_keys as f64 / (depth + 1) as f64);
         }
         best_path
     }
 
+    #[hotpath::measure]
     fn evaluate_search(eval_buf: &mut ArrayVec<ArrayVec<SearchNode<ShapeBoard>, 68>, {EVALUATE_DEPTH+1}>, node: &SearchNode<ShapeBoard>, piece_sequence: &ArrayVec<PieceType, EVALUATE_DEPTH>, i_left: usize) -> f64 {
         // we use a brute-force dfs to search for EVALUATE_DEPTH pieces and return the best score
         let mut best_score = f64::INFINITY;
