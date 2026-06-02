@@ -39,19 +39,199 @@ impl SearchNode<ShapeBoard> {
 pub struct FastMask(u32);
 impl FastMask {
     #[inline(always)]
-    pub fn width(self) -> u8 { (self.0 & 0b11) as u8 + 1}
+    fn guard_mask(self) -> u32 { self.0 & 0o40404040 }
     #[inline(always)]
-    fn bottom0(self) -> u8 { ((self.0 >> 2) & 0b11) as u8 }
+    fn added_mask(self) -> u32 { self.0 & 0o07070707 }
     #[inline(always)]
-    fn bottom1(self) -> u8 { ((self.0 >> 4) & 0b11) as u8 }
+    fn packed_bottoms(self) -> u32 { (self.0 & 0o30303030) >> 3 }
     #[inline(always)]
-    fn bottom2(self) -> u8 { ((self.0 >> 6) & 0b11) as u8 }
+    fn max_height(self) -> u32 { self.0 >> 24 }
+}
+
+pub trait Board: Clone + Copy + PartialEq + Eq + std::hash::Hash + Default {
+    fn drop_piece(&self, x: u8, shape_idx: u8, lines_cleared: u16) -> Option<(Self, u8)>;
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct ShapeBoard {
+    pub packed_shape: u64,
+}
+impl ShapeBoard {
+    pub const COL_MASK: u64 = 0x1F;
+    pub const LANE_SIZE: u8 = 6;
+    const GUARD: u64 = 0o40404040404040404040;
+
     #[inline(always)]
-    fn bottom3(self) -> u8 { ((self.0 >> 8) & 0b11) as u8 }
+    pub fn get_height(&self, col: usize) -> u64 {
+        (self.packed_shape >> (col as u8 * Self::LANE_SIZE)) & Self::COL_MASK
+    }
+}
+impl Board for ShapeBoard {
+    #[inline]
+    fn drop_piece(&self, x: u8, shape_idx: u8, lines_cleared: u16) -> Option<(Self, u8)> {
+        let mask = &SHAPE_TABLE[shape_idx as usize];
+        let guard_mask = mask.guard_mask();
+        let lane1_mask = guard_mask >> 5;
+        debug_assert!(x as u32 + mask.guard_mask().count_ones() <= 10);
+        let shift = x * ShapeBoard::LANE_SIZE;
+        let cols = (self.packed_shape >> shift) as u32 & (guard_mask - lane1_mask);
+        let diff = (cols | guard_mask) - mask.packed_bottoms();
+        #[cfg(feature = "quad_only")]
+        {
+            if diff != (diff & 0x3F) * lane1_mask {
+                return None;
+            }
+            let peak_height = ((diff & 0x1F) + mask.max_height()) as u16;
+            if peak_height > 20 || peak_height > TARGET_LINES - lines_cleared {
+                return None;
+            }
+            let new_shape = self.packed_shape + ((mask.added_mask() as u64) << shift);
+            let g = new_shape.wrapping_sub(Self::GUARD >> 5) & Self::GUARD;
+            if g == 0 {
+                let g = new_shape.wrapping_sub(Self::GUARD >> 3) & Self::GUARD;
+                (g == 0).then(|| (Self { packed_shape: new_shape - 4 * const { Self::GUARD >> 5 } }, 4))
+            } else {
+                Some((Self { packed_shape: new_shape }, 0))
+            }
+        }
+        #[cfg(not(feature = "quad_only"))]
+        {
+            let base_y_offset = (diff & 0x3F).max((diff >> 6) & 0x3F).max(((diff >> 12) & 0x3F).max((diff >> 18) & 0x3F));
+            debug_assert!(base_y_offset >= 32);
+            let base_y = base_y_offset & 0x1F;
+            let peak_height = (base_y + mask.max_height()) as u16;
+            if peak_height > 20 || peak_height > TARGET_LINES - lines_cleared {
+                return None;
+            }
+            let bit_shape = BIT_TABLE[shape_idx as usize] & 0xFFFFFF;
+            let board_lane1 = ShapeBoard::GUARD >> 5;
+            let mut cleared_mask = 0u32;
+            let mut lines_cleared_count = 0;
+            for r in 0..mask.max_height() {
+                let board_guard = ((self.packed_shape | ShapeBoard::GUARD) - ((base_y + r + 1) as u64) * board_lane1) & ShapeBoard::GUARD;
+                // the columns that higher than base_y + r
+                let piece_guard = ((((bit_shape >> r) & lane1_mask) << 5) as u64) << shift;
+                // the columns that the block cell exists
+                if (board_guard | piece_guard) & ShapeBoard::GUARD == ShapeBoard::GUARD {
+                    cleared_mask |= 1 << r;
+                    lines_cleared_count += 1;
+                }
+            }
+            let cleared_shape = bit_shape & !(cleared_mask * lane1_mask);
+            let stacked_guard = (guard_mask - ((base_y_offset * lane1_mask) - diff)) & guard_mask;
+            // this will not cause overflow, because diff = col + 32 - bottom, col <= 20, bottom <= 2
+            let stacked_full = stacked_guard - (stacked_guard >> 5);
+            if (cleared_shape & !stacked_full) != 0 {
+                return None;
+            }
+            let added_board = self.packed_shape + (((mask.added_mask() & stacked_full) as u64) << shift);
+            let mut drop_total = 0u64;
+            if cleared_mask != 0 {
+                for r in 0..mask.max_height() {
+                    if cleared_mask & (1 << r) != 0 {
+                        drop_total += (((added_board | Self::GUARD) - (base_y + r) as u64 * board_lane1) & Self::GUARD) >> 5;
+                    }
+                }
+            }
+            Some((Self { packed_shape: added_board - drop_total }, lines_cleared_count as u8))
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct BitBoard(u64);
+impl BitBoard {
+    const BOARD_MASK: u64 = 0x0FFF_FFFF_FFFF_FFFF;
+    pub const ROW_MASK: u64 = 0x0041_0410_4104_1041;
+    const COL_MASK: u64 = 0x3F;
     #[inline(always)]
-    fn max_height(self) -> u8 { ((self.0 >> 10) & 0b11) as u8 + 1 }
+    pub fn get_column(&self, col: usize) -> u64 {
+        self.0 >> (col * 6) & Self::COL_MASK
+    }
     #[inline(always)]
-    fn added_mask(self) -> u32 { self.0 >> 12 }
+    pub fn raw(&self) -> u64 {
+        self.0
+    }
+    #[inline(always)]
+    pub fn occupied_cells(&self) -> u16 {
+        self.0.count_ones() as u16
+    }
+    #[inline(always)]
+    fn full_rows(board: u64) -> u64 {
+        let mut rows = board;
+        rows &= board >> 12;
+        // bit 0-48
+        rows &= rows >> 6;
+        rows &= rows >> 12;
+        rows &= rows >> 24;
+        debug_assert!(rows < Self::COL_MASK);
+        rows
+    }
+    #[inline]
+    pub fn from_shape_board(shape: ShapeBoard) -> Self {
+        let mut board = 0;
+        for col in 0..10 {
+            let height = shape.get_height(col);
+            debug_assert!(height <= 4);
+            board |= ((1u64 << height) - 1) << (col * 6);
+        }
+        Self(board)
+    }
+    fn try_place(&self, x: u8, shape_idx: u8, lines_cleared: u16) -> Option<Self> {
+        let shape = BIT_TABLE[shape_idx as usize];
+        debug_assert!(TARGET_LINES - lines_cleared <= 4);
+        let mut height = (((TARGET_LINES - lines_cleared) as u8) + {2 * !PC_END as u8}).checked_sub((shape >> 24) as u8)?;
+        // means the highest row of the piece can be put
+        let mask = ((shape as u64) & 0xFFFFFF) << (x * 6);
+        // hit check: if I put the piece at height, compute the hitbox
+        let mut hitbox = mask << height; // It's guaranteed that this << won't overflow
+        hitbox |= (hitbox & (BitBoard::ROW_MASK * 0x1F)) << 1; // 1 line blow-up
+        hitbox |= (hitbox & (BitBoard::ROW_MASK * 0xF)) << 2; // 3 lines blow-up
+        hitbox |= (hitbox & (BitBoard::ROW_MASK * 0x3)) << 4; // 7 lines blow-up
+        if self.0 & hitbox != 0 {
+            return None;
+        }
+        while height > 0 {
+            if self.0 & (mask << (height - 1)) != 0 {
+                break;
+            }
+            height -= 1;
+        }
+        debug_assert!(self.0 & (mask << height) == 0);
+        let placed = self.0 | (mask << height);
+        debug_assert!(placed < Self::BOARD_MASK);
+        Some(Self(placed))
+    }
+    fn clear_lines(&self) -> (Self, u8) {
+        let cleared_lines = Self::full_rows(self.0);
+        let mut new_board = self.0;
+        if cleared_lines & 32 != 0 {
+            new_board &= BitBoard::ROW_MASK * 0x1F;
+        }
+        if cleared_lines & 16 != 0 {
+            new_board = new_board & (BitBoard::ROW_MASK * 0xF) | (new_board & (BitBoard::ROW_MASK * 0x20)) >> 1;
+        }
+        if cleared_lines & 8 != 0 {
+            new_board = new_board & (BitBoard::ROW_MASK * 7) | (new_board & (BitBoard::ROW_MASK * 0x30)) >> 1;
+        }
+        if cleared_lines & 4 != 0 {
+            new_board = new_board & (BitBoard::ROW_MASK * 3) | (new_board & (BitBoard::ROW_MASK * 0x38)) >> 1;
+        }
+        if cleared_lines & 2 != 0 {
+            new_board = new_board & (BitBoard::ROW_MASK) | (new_board & (BitBoard::ROW_MASK * 0x3C)) >> 1;
+        }
+        if cleared_lines & 1 != 0 {
+            new_board = (new_board & (BitBoard::ROW_MASK * 0x3E)) >> 1;
+        }
+        debug_assert!(new_board < Self::BOARD_MASK);
+        (Self(new_board), cleared_lines.count_ones() as u8)
+    }
+}
+impl Board for BitBoard {
+    #[inline]
+    fn drop_piece(&self, x: u8, shape_idx: u8, lines_cleared: u16) -> Option<(Self, u8)> {
+        let placed = self.try_place(x, shape_idx, lines_cleared)?;
+        Some(placed.clear_lines())
+    }
 }
 
 pub const SHAPE_RANGES: [usize; 8] = [
@@ -113,30 +293,6 @@ const FINESSE_PARAMS: [(u8, [u8; 10], u64, u64, u64, u64); 19] = [
     (4, [1,2,1,0,1,2,1,0,0,0], 0x1100011, 0x1110010, 0x0100111, 0x0000000),
     (1, [2,2,2,2,1,1,2,2,2,2], 0x1110000111, 0x1001000000, 0x0000001001, 0x0001001000),
 ];
-const fn shape_to_bit(arr: &[FastMask; 19]) -> [u32; 19] {
-    let mut bit_arr = [0u32; 19];
-    let mut i = 0;
-    while i < arr.len() {
-        let mask = arr[i];
-        let mut max_height = 0;
-        let mut bit_mask = 0;
-        let mut x = 0;
-        while x <= (mask.0 & 0b11) {
-            let bottom = mask.0 >> (2 + 2 * x) & 0b11;
-            let height = mask.0 >> 12 >> (5 * x) & 0xF;
-            if max_height < height + bottom {
-                max_height = height + bottom;
-            }
-            bit_mask |= ((1u32 << height) - 1) << bottom << (x * 6);
-            // The highest shape bit is below bit 24, so bits 24-26 store the max height.
-            x += 1;
-        }
-        assert!(bit_mask.count_ones() == 4, "Each shape must have exactly 4 cells");
-        bit_arr[i] = bit_mask | max_height << 24;
-        i += 1;
-    }
-    bit_arr
-}
 pub const FINESSE_TABLE: [u64; 19] = {
     let mut table = [0u64; 19];
     let mut i = 0;
@@ -173,208 +329,49 @@ const SHAPE_TABLE: [FastMask; 19] = {
             let mut i = 0;
             let mut cells = 0;
             while i < width {
-                let col_mask = (added_mask >> (4 * (width - 1 - i))) & 0xF;
-                mask |= col_mask << (5 * i);
-                cells += col_mask;
+                let height = (added_mask >> (4 * (width - 1 - i))) & 0xF;
+                mask |= height << (ShapeBoard::LANE_SIZE * i);
+                assert!(height <= 4);
+                assert!(bottom[i as usize] < 4);
+                cells += height;
                 i += 1;
             }
             assert!(cells == 4, "added_mask must have exactly 4 cells");
             assert!(mask < 1 << 19, "added_mask must be smaller than 2**19");
             mask
         };
-        let packed = ((width - 1) as u32)
-            | (bottom[0] as u32) << 2
-            | (bottom[1] as u32) << 4
-            | (bottom[2] as u32) << 6
-            | (bottom[3] as u32) << 8
-            | ((max_height - 1) as u32) << 10
-            | parsed_added_mask << 12;
-        table[i] = FastMask(packed);
+        let packed_bottoms = (bottom[0] as u32)
+            | (bottom[1] as u32) << 6
+            | (bottom[2] as u32) << 12
+            | (bottom[3] as u32) << 18;
+        let guard_mask = 0o40404040 & ((1u32 << (width * 6)) - 1);
+        assert!(guard_mask.count_ones() as u8 == width);
+        let packed = FastMask(parsed_added_mask | packed_bottoms << 3 | guard_mask | (max_height as u32) << 24);
+        table[i] = packed;
         i += 1;
     }
     table
 };
-pub const BIT_TABLE: [u32; 19] = shape_to_bit(&SHAPE_TABLE);
-
-pub trait Board: Clone + Copy + PartialEq + Eq + std::hash::Hash + Default {
-    const QUAD_ONLY: bool = true;
-    fn drop_piece(&self, x: u8, shape_idx: u8, lines_cleared: u16) -> Option<(Self, u8)>;
-}
-trait BoardInternal: Sized {
-    const QUAD_ONLY: bool = true;
-    fn try_place(&self, x: u8, shape_idx: u8, lines_cleared: u16) -> Option<Self>;
-    fn clear_lines(&self) -> (Self, u8);
-}
-impl<B> Board for B where B: BoardInternal + Clone + Copy + PartialEq + Eq + std::hash::Hash + Default {
-    const QUAD_ONLY: bool = B::QUAD_ONLY;
-    #[inline]
-    fn drop_piece(&self, x: u8, shape_idx: u8, lines_cleared: u16) -> Option<(Self, u8)> {
-        let placed = self.try_place(x, shape_idx, lines_cleared)?;
-        let (cleared_board, lines) = placed.clear_lines();
-        
-        if Self::QUAD_ONLY && lines_cleared <= TARGET_LINES - 4 && lines != 0 && lines != 4 {
-            return None;
-        }
-        
-        Some((cleared_board, lines))
-    }
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct ShapeBoard {
-    pub packed_shape: u64,
-}
-impl ShapeBoard {
-    pub const COL_MASK: u64 = 0x1F;
-    #[inline(always)]
-    pub fn get_height(&self, col: usize) -> u64 {
-        (self.packed_shape >> (col * 5)) & Self::COL_MASK
-    }
-}
-impl BoardInternal for ShapeBoard {
-    #[inline(always)]
-    fn try_place(&self, x: u8, shape_idx: u8, lines_cleared: u16) -> Option<Self> {
-        let mask = &SHAPE_TABLE[shape_idx as usize];
-        debug_assert!(x + mask.width() <= 10);
-
-        let shift = x * 5;
-        let cols = self.packed_shape >> shift;
-        let h0 = (cols & Self::COL_MASK) as u8;
-        let b0 = mask.bottom0();
-        if h0 < b0 { return None; }
-        let base_y = h0 - b0;
-        let width = mask.width();
-        if width > 1 {
-            let h1 = ((cols >> 5) & Self::COL_MASK) as u8;
-            let b1 = mask.bottom1();
-            if h1 < b1 || h1 - b1 != base_y { return None; }
-        }
-        if width > 2 {
-            let h2 = ((cols >> 10) & Self::COL_MASK) as u8;
-            let b2 = mask.bottom2();
-            if h2 < b2 || h2 - b2 != base_y { return None; }
-        }
-        if width > 3 {
-            let h3 = ((cols >> 15) & Self::COL_MASK) as u8;
-            let b3 = mask.bottom3();
-            if h3 < b3 || h3 - b3 != base_y { return None; }
-        }
-
-        if base_y + mask.max_height() > 20 || (base_y + mask.max_height()) as u16 > TARGET_LINES - lines_cleared {
-            return None;
-        }
-
-        Some(Self{packed_shape: self.packed_shape + ((mask.added_mask() as u64) << shift)})
-    }
-    #[inline(always)]
-    fn clear_lines(&self) -> (Self, u8) {
-        let mut min_h = (self.packed_shape & Self::COL_MASK) as u8;
-        let mut min_h2 = ((self.packed_shape >> 5) & Self::COL_MASK) as u8;
-        min_h = min_h.min(((self.packed_shape >> 10) & Self::COL_MASK) as u8);
-        min_h2 = min_h2.min(((self.packed_shape >> 15) & Self::COL_MASK) as u8);
-        min_h = min_h.min(((self.packed_shape >> 20) & Self::COL_MASK) as u8);
-        min_h2 = min_h2.min(((self.packed_shape >> 25) & Self::COL_MASK) as u8);
-        min_h = min_h.min(((self.packed_shape >> 30) & Self::COL_MASK) as u8);
-        min_h2 = min_h2.min(((self.packed_shape >> 35) & Self::COL_MASK) as u8);
-        min_h = min_h.min(((self.packed_shape >> 40) & Self::COL_MASK) as u8);
-        min_h2 = min_h2.min(((self.packed_shape >> 45) & Self::COL_MASK) as u8);
-
-        const MIN_H_MASK: u64 = 1u64 | (1u64 << 5) | (1u64 << 10) | (1u64 << 15)
-            | (1u64 << 20) | (1u64 << 25) | (1u64 << 30)
-            | (1u64 << 35) | (1u64 << 40) | (1u64 << 45);
-        min_h = min_h.min(min_h2);
-        (Self{packed_shape: self.packed_shape - min_h as u64 * MIN_H_MASK}, min_h)
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct BitBoard(u64);
-impl BitBoard {
-    const BOARD_MASK: u64 = 0x0FFF_FFFF_FFFF_FFFF;
-    pub const ROW_MASK: u64 = 0x0041_0410_4104_1041;
-    const COL_MASK: u64 = 0x3F;
-    #[inline(always)]
-    pub fn get_column(&self, col: usize) -> u64 {
-        self.0 >> (col * 6) & Self::COL_MASK
-    }
-    #[inline(always)]
-    pub fn raw(&self) -> u64 {
-        self.0
-    }
-    #[inline(always)]
-    pub fn occupied_cells(&self) -> u16 {
-        self.0.count_ones() as u16
-    }
-    #[inline(always)]
-    fn full_rows(board: u64) -> u64 {
-        let mut rows = board;
-        rows &= board >> 12;
-        // bit 0-48
-        rows &= rows >> 6;
-        rows &= rows >> 12;
-        rows &= rows >> 24;
-        debug_assert!(rows < Self::COL_MASK);
-        rows
-    }
-    #[inline]
-    pub fn from_shape_board(shape: ShapeBoard) -> Self {
-        let mut board = 0;
-        for col in 0..10 {
-            let height = shape.get_height(col);
-            debug_assert!(height <= 4);
-            board |= ((1u64 << height) - 1) << (col * 6);
-        }
-        Self(board)
-    }
-}
-impl BoardInternal for BitBoard {
-    const QUAD_ONLY: bool = false;
-    fn try_place(&self, x: u8, shape_idx: u8, lines_cleared: u16) -> Option<Self> {
-        let shape = BIT_TABLE[shape_idx as usize];
-        debug_assert!(TARGET_LINES - lines_cleared <= 4);
-        let mut height = (((TARGET_LINES - lines_cleared) as u8) + {2 * !PC_END as u8}).checked_sub((shape >> 24) as u8)?;
-        // means the highest row of the piece can be put
-        let mask = ((shape as u64) & 0xFFFFFF) << (x * 6);
-        // hit check: if I put the piece at height, compute the hitbox
-        let mut hitbox = mask << height; // It's guaranteed that this << won't overflow
-        hitbox |= (hitbox & (BitBoard::ROW_MASK * 0x1F)) << 1; // 1 line blow-up
-        hitbox |= (hitbox & (BitBoard::ROW_MASK * 0xF)) << 2; // 3 lines blow-up
-        hitbox |= (hitbox & (BitBoard::ROW_MASK * 0x3)) << 4; // 7 lines blow-up
-        if self.0 & hitbox != 0 {
-            return None;
-        }
-        while height > 0 {
-            if self.0 & (mask << (height - 1)) != 0 {
-                break;
+pub const BIT_TABLE: [u32; 19] = {    
+    let mut table = [0u32; 19];
+    let mut i = 0;
+    while i < SHAPE_PARAMS.len() {
+        let (width, bottom, max_height, added_mask) = SHAPE_PARAMS[i];
+        let bit_mask = {
+            let mut mask = 0;
+            let mut i = 0;
+            while i < width {
+                let bottom = bottom[i as usize] as u32;
+                let height = (added_mask >> (4 * (width - 1 - i))) & 0xF;
+                mask |= ((1u32 << height) - 1) << bottom << (i * 6);
+                // The highest shape bit is below bit 24, so bits 24-26 store the max height.
+                i += 1;
             }
-            height -= 1;
-        }
-        debug_assert!(self.0 & (mask << height) == 0);
-        let placed = self.0 | (mask << height);
-        debug_assert!(placed < Self::BOARD_MASK);
-        Some(Self(placed))
+            assert!(mask.count_ones() == 4, "Each shape must have exactly 4 cells");
+            mask
+        };
+        table[i] = bit_mask | (max_height as u32) << 24;
+        i += 1;
     }
-    fn clear_lines(&self) -> (Self, u8) {
-        let cleared_lines = Self::full_rows(self.0);
-        let mut new_board = self.0;
-        if cleared_lines & 32 != 0 {
-            new_board &= BitBoard::ROW_MASK * 0x1F;
-        }
-        if cleared_lines & 16 != 0 {
-            new_board = new_board & (BitBoard::ROW_MASK * 0xF) | (new_board & (BitBoard::ROW_MASK * 0x20)) >> 1;
-        }
-        if cleared_lines & 8 != 0 {
-            new_board = new_board & (BitBoard::ROW_MASK * 7) | (new_board & (BitBoard::ROW_MASK * 0x30)) >> 1;
-        }
-        if cleared_lines & 4 != 0 {
-            new_board = new_board & (BitBoard::ROW_MASK * 3) | (new_board & (BitBoard::ROW_MASK * 0x38)) >> 1;
-        }
-        if cleared_lines & 2 != 0 {
-            new_board = new_board & (BitBoard::ROW_MASK) | (new_board & (BitBoard::ROW_MASK * 0x3C)) >> 1;
-        }
-        if cleared_lines & 1 != 0 {
-            new_board = (new_board & (BitBoard::ROW_MASK * 0x3E)) >> 1;
-        }
-        debug_assert!(new_board < Self::BOARD_MASK);
-        (Self(new_board), cleared_lines.count_ones() as u8)
-    }
-}
+    table
+};

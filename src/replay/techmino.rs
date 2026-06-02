@@ -120,7 +120,7 @@ impl ReplayConsumer for TechminoConsumer {
             self.timestamp += self.tap_wait;
         }
         self.tap(ActionKind::HardDrop);
-        self.timestamp += self.das_frame.saturating_sub(self.tap_wait * 3 + events.len() as u32 * 2);
+        self.timestamp += self.das_wait.saturating_sub(self.tap_wait * 3 + events.len() as u32);
     }
     fn pipeline(&mut self, dir: ActionKind) {
         let event = match dir {
@@ -143,11 +143,11 @@ impl ReplayConsumer for TechminoConsumer {
             match path[i] {
                 PathNode::Normal(node) => {
                     let heights = (0..10).map(|j| node.state.get_height(j)).collect::<Vec<_>>();
-                    error!("Node meta: {:016b}, keys_pressed: {}, board: {:016x}, heights: {:?}", node.meta, node.keys_pressed, node.state.packed_shape, heights);
+                    error!("Node meta: {:016b}, keys_pressed: {}, board: {:016o}, heights: {:?}", node.meta, node.keys_pressed, node.state.packed_shape, heights);
                 }
                 PathNode::Pc(node) => {
                     let heights = (0..10).map(|j| node.state.get_column(j)).collect::<Vec<_>>();
-                    error!("PC Node meta: {:016b}, keys_pressed: {}, board: {:016x}, heights: {:?}", node.meta, node.keys_pressed, node.state.raw(), heights);
+                    error!("PC Node meta: {:016b}, keys_pressed: {}, board: {:016o}, heights: {:?}", node.meta, node.keys_pressed, node.state.raw(), heights);
                 }
             }
             panic!();

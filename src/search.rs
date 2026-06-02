@@ -94,7 +94,6 @@ impl BeamSearch {
         }
         None
     }
-    #[hotpath::measure]
     pub fn run(piece_sequence: &[PieceType]) -> Vec<PathNode> {
     // result format: null state (board=0) at index 0, step i: takes piece_sequence[i], then go to step i+1, so |result| = |piece_sequence| + 1
         let i_left_suffix: Vec<usize> = piece_sequence.iter().rev().scan(0, |sum, &piece| { *sum += (piece == PieceType::I) as usize; Some(*sum) }).collect::<Vec<_>>().into_iter().rev().chain([0]).collect();
@@ -108,6 +107,7 @@ impl BeamSearch {
         layers[0].push(SearchNode::<ShapeBoard>::initial());
 
         for depth in 0..max_depth {
+            hotpath::measure_block!("search_step", {
             if let Some(best) = best_path.last() {
                 endgame_shared.set_best(best.keys_pressed());
             }
@@ -183,7 +183,7 @@ impl BeamSearch {
                 let mut max_h = packed & ShapeBoard::COL_MASK;
                 let mut max_idx = 0;
                 for i in 1..10 {
-                    packed >>= 5;
+                    packed >>= ShapeBoard::LANE_SIZE;
                     let h = packed & ShapeBoard::COL_MASK;
                     if max_h < h {
                         max_h = h;
@@ -198,6 +198,7 @@ impl BeamSearch {
                 };
             }
             info!("Depth {}: layer size = {}, kpp = {}", depth + 1, layers[depth + 1].len(), minimum_keys as f64 / (depth + 1) as f64);
+            });
         }
         best_path
     }

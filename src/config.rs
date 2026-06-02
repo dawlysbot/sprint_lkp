@@ -3,8 +3,8 @@ pub const NO_HOLD: bool = cfg!(feature = "nohold");
 pub const PC_END: bool = cfg!(feature = "pcend");
 pub const MAX_PIECES: usize = TARGET_LINES as usize * 5 / 2 + (!NO_HOLD as usize) + (!PC_END as usize);
 
-pub const BEAM_WIDTH: usize = 10000;
-pub const DIVERSITY_BUCKET_SIZE: usize = 200;
+pub const BEAM_WIDTH: usize = 3000;
+pub const DIVERSITY_BUCKET_SIZE: usize = 300;
 pub const ENDGAME_DEPTH: usize = 7;
 pub const ENDGAME_START: usize = MAX_PIECES - ENDGAME_DEPTH;
 pub const EVALUATE_DEPTH: usize = 5;
